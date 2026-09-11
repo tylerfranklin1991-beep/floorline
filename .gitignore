@@ -1,0 +1,30 @@
+node_modules
+dist
+.output
+.vercel
+.nitro
+.tanstack
+.wrangler
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+.pglite
+data
+*.local
+
+# QA and sandbox
+screenshots
+artifacts
+.grok
+.agent-browser
+AGENTS.md
+AGENTS.project.md
+
+# Generated
+*.tsbuildinfo
+coverage
+.cache
+.project_id

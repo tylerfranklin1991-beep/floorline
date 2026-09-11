@@ -1,0 +1,1643 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Instrument Serif", "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-background: #f3efe4;
+  --color-foreground: #1c1b18;
+  --color-card: #fffbf3;
+  --color-muted: #e7e0d0;
+  --color-muted-foreground: #5c574d;
+  --color-accent: #2f3d36;
+  --color-accent-foreground: #f3efe4;
+  --color-primary: #1c1b18;
+  --color-primary-foreground: #f3efe4;
+  --color-secondary: #e8e1d2;
+  --color-secondary-foreground: #1c1b18;
+  --color-border: color-mix(in oklab, #1c1b18 14%, transparent);
+  --color-ring: #1c1b18;
+  --color-paper: #fbf7ed;
+  --color-ink: #1c1b18;
+  --color-desk: #ddd4c3;
+  --color-night: #1c1b18;
+  --color-night-foreground: #f3efe4;
+  --color-destructive: #a3453c;
+  --color-plan-grid: color-mix(in oklab, #1c1b18 14%, transparent);
+  --color-plan-muted: color-mix(in oklab, #1c1b18 55%, transparent);
+  --color-room-living: #e6dcc8;
+  --color-room-kitchen: #d9d6ce;
+  --color-room-dining: #e2d8c4;
+  --color-room-bedroom: #e4d5c9;
+  --color-room-bath: #d5ddd8;
+  --color-room-hallway: #ece7dc;
+  --color-room-closet: #ddd6ca;
+  --color-room-office: #d7dcd3;
+  --color-room-laundry: #d8d4cc;
+  --color-room-garage: #d2d0c9;
+  --color-room-outdoor: #d3dccf;
+  --color-room-other: #e0dcd3;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    height: 100%;
+    pointer-events: auto;
+  }
+
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    min-height: 100dvh;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    pointer-events: auto;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  img {
+    outline: 1px solid color-mix(in oklab, var(--color-foreground) 10%, transparent);
+    outline-offset: -1px;
+  }
+
+  img.plain-image {
+    outline: none;
+  }
+}
+
+.pt-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.pb-safe-lg {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+}
+
+.px-page {
+  padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Layout shells — mobile first, then media queries below                     */
+/* -------------------------------------------------------------------------- */
+
+.landing-header {
+  position: relative;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+  padding-bottom: 0.75rem;
+}
+
+.landing-main {
+  position: relative;
+  display: grid;
+  gap: 2rem;
+  margin-inline: auto;
+  max-width: 72rem;
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px));
+}
+
+.landing-main.has-draft {
+  padding-bottom: 8rem;
+}
+
+.landing-title {
+  margin-top: 0.75rem;
+  max-width: 36rem;
+  font-size: 2.25rem;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.landing-copy {
+  margin-top: 1rem;
+}
+
+.landing-drop {
+  margin-top: 0;
+}
+
+.landing-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sample-preview {
+  position: relative;
+  aspect-ratio: 16 / 10;
+}
+
+.sample-body {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.sample-heading {
+  margin-top: 0.5rem;
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.survey-thumbs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.survey-thumbs img {
+  aspect-ratio: 1 / 1;
+}
+
+.survey-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.survey-action {
+  width: 100%;
+}
+
+.header-sample,
+.draft-inline {
+  display: none;
+}
+
+.draft-bar {
+  display: block;
+}
+
+.capture-tiles {
+  position: relative;
+  z-index: 10;
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.drop-desk,
+.drop-desk-actions {
+  display: none;
+}
+
+.media-thumbs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.media-thumbs .remove-thumb {
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+.units-btn {
+  height: 2.75rem;
+}
+
+.studio-header {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+  padding-bottom: 0.5rem;
+  padding-right: max(1.25rem, env(safe-area-inset-right, 0px), 3.5rem);
+}
+
+.studio-mark,
+.studio-desk-toolbar,
+.studio-sidebar,
+.studio-hint-desk {
+  display: none;
+}
+
+.studio-title,
+.studio-phone-actions,
+.studio-fit,
+.studio-phone-bar {
+  display: flex;
+}
+
+.studio-hint-phone {
+  display: none;
+}
+
+.studio-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.studio-phone-actions {
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.studio-phone-bar {
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  padding-right: max(1.25rem, env(safe-area-inset-right, 0px), 3.5rem);
+}
+
+.studio-phone-bar.is-hidden {
+  visibility: hidden;
+}
+
+[data-vaul-overlay][data-state="closed"],
+[data-vaul-drawer][data-state="closed"],
+.studio-drawer[data-state="closed"] {
+  pointer-events: none !important;
+}
+
+.capture-overlay,
+.process-overlay {
+  align-items: flex-end;
+  padding: 0;
+}
+
+.capture-sheet {
+  border-radius: 1rem 1rem 0 0;
+}
+
+.process-sheet {
+  border-radius: 1rem 1rem 0 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Guided walk — full-screen live video + popup cues                          */
+/* -------------------------------------------------------------------------- */
+
+.guide-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-night);
+  color: var(--color-night-foreground);
+  --color-foreground: var(--color-night-foreground);
+  --color-background: var(--color-night);
+  --color-muted-foreground: color-mix(in oklab, var(--color-night-foreground) 68%, transparent);
+  --color-card: #26241f;
+  --color-secondary: #32302b;
+  --color-border: color-mix(in oklab, var(--color-night-foreground) 16%, transparent);
+  --color-accent: #d8d2c4;
+  --color-accent-foreground: var(--color-night);
+}
+
+.guide-top {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.75rem;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px), 3.75rem) 0.65rem
+    max(0.75rem, env(safe-area-inset-left, 0px));
+}
+
+.guide-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-background) 82%, transparent);
+  padding: 0.35rem 0.7rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.guide-rec-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-destructive);
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.guide-brief {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 0.5rem max(1.25rem, env(safe-area-inset-right, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px))
+    max(1.25rem, env(safe-area-inset-left, 0px));
+}
+
+.guide-brief-copy {
+  max-width: 32rem;
+}
+
+.guide-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.guide-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0 0.9rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.875rem;
+}
+
+.guide-chip.is-on {
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+  border-color: color-mix(in oklab, var(--color-foreground) 22%, transparent);
+}
+
+.guide-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.guide-view {
+  position: relative;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: #0c0d0e;
+}
+
+.guide-video {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.guide-video.is-off {
+  display: none;
+}
+
+.guide-brackets {
+  pointer-events: none;
+  position: absolute;
+  inset: 12% 10%;
+}
+
+.guide-brackets span {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-color: color-mix(in oklab, var(--color-foreground) 70%, transparent);
+  border-style: solid;
+}
+
+.guide-brackets span:nth-child(1) {
+  top: 0;
+  left: 0;
+  border-width: 2px 0 0 2px;
+}
+
+.guide-brackets span:nth-child(2) {
+  top: 0;
+  right: 0;
+  border-width: 2px 2px 0 0;
+}
+
+.guide-brackets span:nth-child(3) {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2px 2px;
+}
+
+.guide-brackets span:nth-child(4) {
+  right: 0;
+  bottom: 0;
+  border-width: 0 2px 2px 0;
+}
+
+.guide-banner {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  left: 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--color-background) 86%, transparent);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-foreground);
+}
+
+.guide-progress {
+  pointer-events: none;
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  gap: 0.35rem;
+  transform: translateX(-50%);
+}
+
+.guide-progress li {
+  width: 1.15rem;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-foreground) 28%, transparent);
+}
+
+.guide-progress li.is-now {
+  background: var(--color-foreground);
+}
+
+.guide-progress li.is-done {
+  background: var(--color-accent);
+}
+
+.guide-rec.is-pass {
+  background: color-mix(in oklab, var(--color-accent) 18%, var(--color-background));
+}
+
+.guide-rec.is-warn {
+  background: color-mix(in oklab, var(--color-destructive) 22%, var(--color-background));
+}
+
+.guide-rec.is-paused {
+  background: color-mix(in oklab, var(--color-foreground) 12%, var(--color-background));
+}
+
+.guide-live-chip {
+  pointer-events: none;
+  position: absolute;
+  top: 0.75rem;
+  bottom: auto;
+  left: 50%;
+  z-index: 1;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-background) 82%, transparent);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+
+.guide-live-chip.is-warn {
+  background: color-mix(in oklab, var(--color-destructive) 28%, var(--color-background));
+}
+
+.guide-live-chip.is-pass {
+  background: color-mix(in oklab, var(--color-accent) 22%, var(--color-background));
+  color: var(--color-accent-foreground);
+}
+
+.guide-arrow {
+  pointer-events: none;
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  width: 3rem;
+  height: 3rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-background) 55%, transparent);
+  color: var(--color-foreground);
+  transform: translate(-50%, -50%);
+}
+
+.guide-geo {
+  pointer-events: none;
+  position: absolute;
+  top: auto;
+  bottom: 1.65rem;
+  left: 0.75rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.guide-compass {
+  position: relative;
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 1px solid color-mix(in oklab, var(--color-foreground) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-background) 72%, transparent);
+}
+
+.guide-compass-rose {
+  position: absolute;
+  inset: 0;
+}
+
+.guide-compass-n {
+  position: absolute;
+  top: 0.15rem;
+  left: 50%;
+  color: var(--color-foreground);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  transform: translateX(-50%);
+}
+
+.guide-compass-lubber {
+  position: absolute;
+  top: -0.15rem;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-right: 0.2rem solid transparent;
+  border-top: 0.45rem solid var(--color-destructive);
+  border-left: 0.2rem solid transparent;
+  transform: translateX(-50%);
+}
+
+.guide-geo-read {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  border-radius: 0.65rem;
+  background: color-mix(in oklab, var(--color-background) 78%, transparent);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--color-foreground);
+}
+
+.guide-geo-read span {
+  color: var(--color-muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.site-map {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: var(--color-muted);
+  aspect-ratio: 16 / 8;
+}
+
+.site-map img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.site-map-pin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 2px solid var(--color-paper);
+  border-radius: 999px;
+  background: var(--color-destructive);
+  transform: translate(-50%, -50%);
+}
+
+.guide-needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+}
+
+.guide-needs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0 0.55rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.guide-needs li.is-on {
+  border-color: color-mix(in oklab, var(--color-foreground) 28%, transparent);
+  background: var(--color-secondary);
+  color: var(--color-foreground);
+}
+
+.guide-hold {
+  display: block;
+  overflow: hidden;
+  height: 0.16rem;
+  margin-top: 0.45rem;
+  border-radius: 999px;
+  background: var(--color-secondary);
+}
+
+.guide-hold > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--color-foreground);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 120ms linear;
+}
+
+.guide-cue-body {
+  margin-top: 0.2rem;
+  min-height: 0;
+  max-height: 2.55em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  text-wrap: pretty;
+  transition: opacity 160ms var(--ease-smooth-out);
+}
+
+.guide-cue-kicker {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.guide-cue.is-pass {
+  border-color: color-mix(in oklab, var(--color-accent) 40%, var(--color-border));
+}
+
+.guide-cue {
+  pointer-events: none;
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  left: 0.5rem;
+  z-index: 2;
+  margin: 0;
+  border: 1px solid color-mix(in oklab, var(--color-foreground) 16%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--color-background) 72%, transparent);
+  padding: 0.45rem 0.7rem 0.5rem;
+  box-shadow: 0 10px 28px color-mix(in oklab, #000 30%, transparent);
+  backdrop-filter: blur(12px);
+  animation: cue-in 280ms var(--ease-smooth-out) both;
+}
+
+@keyframes cue-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.guide-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+  padding: 0.7rem max(1rem, env(safe-area-inset-right, 0px), 3.75rem) max(0.85rem, env(safe-area-inset-bottom, 0px))
+    max(1rem, env(safe-area-inset-left, 0px));
+}
+
+.guide-actions button {
+  flex: 1;
+  min-height: 2.75rem;
+  padding-inline: 0.4rem;
+  gap: 0.3rem;
+}
+
+.guide-film-note {
+  flex-shrink: 0;
+  padding: 0 max(1rem, env(safe-area-inset-right, 0px), 3.75rem) 0.4rem max(1rem, env(safe-area-inset-left, 0px));
+  color: var(--color-muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.guide-paused-chip {
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-background) 78%, transparent);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-foreground);
+}
+
+.guide-auto-note {
+  flex-shrink: 0;
+  padding: 0.7rem max(1rem, env(safe-area-inset-right, 0px)) max(1.1rem, env(safe-area-inset-bottom, 0px))
+    max(1rem, env(safe-area-inset-left, 0px));
+  color: var(--color-muted-foreground);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.guide-handoff {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 2rem 1.5rem max(2rem, env(safe-area-inset-bottom, 0px));
+  text-align: center;
+}
+
+.guide-review {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 max(1.25rem, env(safe-area-inset-right, 0px)) max(1.5rem, env(safe-area-inset-bottom, 0px))
+    max(1.25rem, env(safe-area-inset-left, 0px));
+}
+
+.guide-review-media {
+  flex: 0 0 auto;
+  aspect-ratio: 16 / 10;
+  max-height: 42%;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: var(--color-muted);
+}
+
+.guide-review-copy {
+  flex-shrink: 0;
+}
+
+.guide-review-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* Phone only — very small screens */
+@media (max-width: 359px) {
+  .capture-tiles {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-title {
+    font-size: 2rem;
+  }
+
+  .media-thumbs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Large phones and small tablets */
+@media (min-width: 640px) {
+  .landing-header {
+    padding-top: 1.25rem;
+    padding-bottom: 1.25rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .landing-main,
+  .landing-main.has-draft {
+    gap: 2.5rem;
+    padding-bottom: 4rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .landing-title {
+    margin-top: 1rem;
+    font-size: 3.75rem;
+  }
+
+  .landing-drop {
+    margin-top: 0;
+  }
+
+  .landing-aside {
+    gap: 1rem;
+  }
+
+  .sample-preview {
+    aspect-ratio: 4 / 3;
+  }
+
+  .sample-body,
+  .survey-footer {
+    padding: 1.25rem;
+  }
+
+  .sample-heading {
+    font-size: 1.5rem;
+  }
+
+  .survey-thumbs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .survey-thumbs img {
+    aspect-ratio: 4 / 3;
+  }
+
+  .survey-footer {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .survey-action {
+    width: auto;
+  }
+
+  .header-sample {
+    display: inline-flex;
+  }
+
+  .draft-inline {
+    display: flex;
+  }
+
+  .draft-bar,
+  .capture-tiles {
+    display: none;
+  }
+
+  .drop-desk {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .drop-desk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .media-thumbs {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .media-thumbs .remove-thumb {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .units-btn {
+    height: 2.25rem;
+  }
+
+  .capture-overlay,
+  .process-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+
+  .capture-sheet,
+  .process-sheet {
+    border-radius: 1rem;
+  }
+
+  .process-overlay {
+    padding: 2rem;
+  }
+}
+
+/* Studio desktop chrome — inspector + full toolbar */
+@media (min-width: 768px) {
+  .studio-header {
+    gap: 0.75rem;
+    padding: 0.625rem 4.5rem 0.625rem 1.25rem;
+  }
+
+  .studio-mark,
+  .studio-desk-toolbar,
+  .studio-sidebar,
+  .studio-hint-desk {
+    display: block;
+  }
+
+  .studio-mark {
+    display: inline-flex;
+  }
+
+  .studio-title,
+  .studio-phone-actions,
+  .studio-hint-phone,
+  .studio-fit,
+  .studio-phone-bar,
+  .studio-drawer {
+    display: none;
+  }
+
+  .studio-sidebar {
+    width: 20rem;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+
+  .studio-header .tap-target {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-width: 0;
+    min-height: 0;
+  }
+}
+
+/* Two-column landing */
+@media (min-width: 1024px) {
+  .landing-main {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    align-items: start;
+    gap: 3.5rem;
+    padding-top: 1.5rem;
+  }
+}
+
+/* Phone landscape — keep the sheet visible */
+@media (min-width: 640px) {
+  .guide-overlay {
+    background: color-mix(in oklab, var(--color-background) 92%, black);
+  }
+
+  .guide-stage,
+  .guide-brief,
+  .guide-review {
+    width: min(42rem, 100%);
+    margin-inline: auto;
+  }
+
+  .guide-view {
+    border-radius: 1rem;
+    margin-inline: 0.75rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .guide-brief {
+    justify-content: center;
+    padding-top: 1.5rem;
+  }
+
+  .guide-view {
+    min-height: 22rem;
+  }
+
+  .guide-review {
+    flex-direction: row;
+    align-items: stretch;
+    padding-bottom: 1.5rem;
+  }
+
+  .guide-review-media {
+    flex: 1.1;
+    min-height: 16rem;
+    max-height: none;
+    aspect-ratio: auto;
+  }
+
+  .guide-review-copy {
+    flex: 0.9;
+    padding-top: 0.5rem;
+  }
+
+  .guide-review-actions {
+    flex-direction: row;
+  }
+}
+
+/* Short landscape (phones on their side) — keep Start/Pause/Stop on screen */
+@media (orientation: landscape) and (max-height: 560px) {
+  .guide-stage {
+    flex-direction: row;
+    width: 100%;
+    max-width: none;
+    margin-inline: 0;
+  }
+
+  .guide-view {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .guide-cue {
+    margin: 0;
+    max-width: none;
+    align-self: auto;
+  }
+
+  .guide-actions {
+    order: -1;
+    flex-direction: column;
+    justify-content: flex-end;
+    width: 7.25rem;
+    padding: 0.5rem 0.5rem max(0.5rem, env(safe-area-inset-bottom, 0px)) max(0.5rem, env(safe-area-inset-left, 0px));
+  }
+
+  .guide-actions button {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+}
+
+@media (max-width: 767px) and (orientation: landscape) {
+  .guide-brief-copy h2 {
+    font-size: 1.75rem;
+  }
+
+  .landing-copy {
+    display: none;
+  }
+
+  .landing-title {
+    font-size: 2rem;
+    margin-top: 0.5rem;
+  }
+
+  .capture-tiles button,
+  .capture-tiles label {
+    min-height: 4.5rem;
+  }
+
+  .studio-header {
+    padding-top: max(0.35rem, env(safe-area-inset-top, 0px));
+    padding-bottom: 0.35rem;
+  }
+
+  .studio-hint-phone {
+    display: none;
+  }
+
+  .studio-phone-bar {
+    padding-top: 0.35rem;
+    padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .sample-preview {
+    aspect-ratio: 21 / 9;
+  }
+}
+
+.tap-target {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+}
+
+.command-trigger {
+  position: relative;
+  z-index: 40;
+  min-width: 9rem;
+  pointer-events: auto;
+}
+
+.command-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px)) max(1rem, env(safe-area-inset-right, 0px)) max(1rem, env(safe-area-inset-bottom, 0px))
+    max(1rem, env(safe-area-inset-left, 0px));
+  pointer-events: auto;
+}
+
+.command-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: color-mix(in oklab, var(--color-ink) 28%, transparent);
+}
+
+.command-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  max-height: min(88dvh, 40rem);
+  width: min(22.5rem, 100%);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  background: var(--color-card);
+  box-shadow: 0 22px 48px color-mix(in oklab, var(--color-ink) 16%, transparent);
+}
+
+.command-panel-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 0.7rem 0.35rem 1rem;
+}
+
+.command-list {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+  overflow-y: auto;
+  padding: 0.25rem 0.7rem 0.9rem;
+}
+
+.command-item {
+  display: flex;
+  min-height: 2.85rem;
+  width: 100%;
+  align-items: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: 0.7rem;
+  background: transparent;
+  padding: 0 0.75rem;
+  color: var(--color-foreground);
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.command-item:hover,
+.command-item:focus-visible {
+  background: var(--color-secondary);
+}
+
+.command-item:disabled {
+  opacity: 0.4;
+}
+
+.command-label {
+  margin: 0.7rem 0.75rem 0.25rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.command-note {
+  margin: 0 0.75rem 0.35rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.command-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0 0.55rem 0.2rem;
+}
+
+.command-chip {
+  min-height: 2.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0 0.85rem;
+  color: var(--color-muted-foreground);
+  font-size: 0.85rem;
+}
+
+.command-chip.is-on {
+  background: var(--color-foreground);
+  border-color: var(--color-foreground);
+  color: var(--color-background);
+}
+
+.capture-tiles button,
+.capture-tiles label {
+  min-height: 5.5rem;
+}
+
+/* Touch devices — 44px targets, no hover-only chrome */
+@media (pointer: coarse) {
+  .studio-phone-bar button,
+  .studio-phone-actions button,
+  .draft-bar button,
+  .guide-chip,
+  .guide-actions button {
+    min-height: 2.75rem;
+  }
+}
+
+@media (hover: none) {
+  .sample-card:hover {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-foreground) 4%, transparent);
+  }
+}
+
+/* High contrast: keep room fills, sharpen UI chrome */
+@media (prefers-contrast: more) {
+  .landing-header,
+  .studio-header,
+  .studio-phone-bar,
+  .draft-bar,
+  .capture-sheet,
+  .process-sheet {
+    border-color: color-mix(in oklab, var(--color-foreground) 40%, transparent);
+  }
+}
+
+.drafting-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--color-foreground) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--color-foreground) 7%, transparent) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 28% 12%, black 18%, transparent 72%);
+}
+
+.plan-paper {
+  fill: var(--color-paper);
+}
+
+.plan-ink {
+  stroke: var(--color-ink);
+}
+
+.plan-ink-fill {
+  fill: var(--color-ink);
+}
+
+.plan-muted-fill {
+  fill: var(--color-plan-muted);
+}
+
+.plan-frame {
+  stroke: var(--color-ink);
+  fill: none;
+}
+
+.plan-wall {
+  stroke: var(--color-ink);
+  stroke-width: 0.32;
+  stroke-linejoin: miter;
+}
+
+.plan-gap {
+  stroke: var(--color-paper);
+}
+
+.plan-swing {
+  stroke: var(--color-ink);
+  opacity: 0.85;
+}
+
+.plan-grid {
+  stroke: var(--color-plan-grid);
+}
+
+.plan-furn-fill {
+  fill: color-mix(in oklab, var(--color-paper) 86%, var(--color-ink) 14%);
+}
+
+.plan-furn-stroke {
+  stroke: var(--color-ink);
+  fill: none;
+}
+
+.plan-furn-fill.plan-furn-stroke {
+  fill: color-mix(in oklab, var(--color-paper) 86%, var(--color-ink) 14%);
+  stroke: var(--color-ink);
+}
+
+.plan-furn-selected .plan-furn-stroke {
+  stroke-width: 0.09;
+}
+
+.plan-room-selected {
+  stroke: var(--color-ink);
+  stroke-width: 0.2;
+  stroke-dasharray: 0.28 0.16;
+}
+
+.theme-blueprint {
+  --color-paper: #102436;
+  --color-ink: #8ec6e6;
+  --color-plan-grid: color-mix(in oklab, #8ec6e6 22%, transparent);
+  --color-plan-muted: color-mix(in oklab, #8ec6e6 62%, transparent);
+  --color-room-living: color-mix(in oklab, #8ec6e6 10%, transparent);
+  --color-room-kitchen: color-mix(in oklab, #8ec6e6 8%, transparent);
+  --color-room-dining: color-mix(in oklab, #8ec6e6 9%, transparent);
+  --color-room-bedroom: color-mix(in oklab, #8ec6e6 11%, transparent);
+  --color-room-bath: color-mix(in oklab, #8ec6e6 7%, transparent);
+  --color-room-hallway: color-mix(in oklab, #8ec6e6 5%, transparent);
+  --color-room-closet: color-mix(in oklab, #8ec6e6 8%, transparent);
+  --color-room-office: color-mix(in oklab, #8ec6e6 8%, transparent);
+  --color-room-laundry: color-mix(in oklab, #8ec6e6 7%, transparent);
+  --color-room-garage: color-mix(in oklab, #8ec6e6 6%, transparent);
+  --color-room-outdoor: color-mix(in oklab, #8ec6e6 12%, transparent);
+  --color-room-other: color-mix(in oklab, #8ec6e6 7%, transparent);
+}
+
+.theme-blueprint .plan-paper {
+  fill: #102436;
+}
+
+.theme-blueprint .plan-gap {
+  stroke: #102436;
+}
+
+.theme-blueprint .plan-ink,
+.theme-blueprint .plan-wall,
+.theme-blueprint .plan-frame,
+.theme-blueprint .plan-swing,
+.theme-blueprint .plan-furn-stroke,
+.theme-blueprint .plan-dim {
+  stroke: #8ec6e6;
+}
+
+.theme-blueprint .plan-ink-fill,
+.theme-blueprint .plan-room-label {
+  fill: #8ec6e6;
+}
+
+.theme-blueprint .plan-muted-fill {
+  fill: color-mix(in oklab, #8ec6e6 62%, transparent);
+}
+
+.theme-ink {
+  --color-paper: #f7f4ec;
+  --color-ink: #161511;
+  --color-plan-grid: color-mix(in oklab, #161511 10%, transparent);
+  --color-plan-muted: color-mix(in oklab, #161511 50%, transparent);
+}
+
+.theme-ink .plan-room,
+.theme-ink .plan-room-selected {
+  fill: transparent;
+}
+
+.theme-sketch {
+  --color-paper: #efe6d3;
+  --color-ink: #3a3328;
+  --color-plan-grid: color-mix(in oklab, #3a3328 12%, transparent);
+  --color-plan-muted: color-mix(in oklab, #3a3328 52%, transparent);
+}
+
+.theme-sketch .plan-paper {
+  fill: #efe6d3;
+}
+
+.theme-sketch .plan-gap {
+  stroke: #efe6d3;
+}
+
+.theme-sketch .plan-wall {
+  stroke-width: 0.26;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.theme-sketch .plan-room,
+.theme-sketch .plan-room-selected {
+  fill: color-mix(in oklab, var(--color-ink) 6%, transparent);
+}
+
+.live-sketch-frame {
+  overflow: hidden;
+  aspect-ratio: 16 / 11;
+  border: 1px solid var(--color-border);
+  border-radius: 0.9rem;
+  background: #efe6d3;
+}
+
+.live-sketch {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.live-sketch-wall {
+  fill: color-mix(in oklab, #3a3328 5%, transparent);
+  stroke: #3a3328;
+  stroke-width: 0.35;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: sketch-draw 0.85s var(--ease-smooth-out) forwards;
+  animation-delay: calc(var(--sketch-i, 0) * 160ms);
+}
+
+.plan-root.is-sketching .plan-room,
+.plan-root.is-sketching .plan-room-selected {
+  opacity: 0;
+  animation: sketch-fill 0.55s var(--ease-smooth-out) forwards;
+  animation-delay: calc(var(--sketch-i, 0) * 140ms + 80ms);
+}
+
+.plan-root.is-sketching .plan-wall {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: sketch-draw 0.7s var(--ease-smooth-out) forwards;
+  animation-delay: calc(var(--sketch-i, 0) * 140ms);
+}
+
+.plan-root.is-sketching .plan-ink,
+.plan-root.is-sketching .plan-swing,
+.plan-root.is-sketching .plan-furn-stroke {
+  stroke-dasharray: 8;
+  stroke-dashoffset: 8;
+  animation: sketch-stroke 0.7s var(--ease-smooth-out) 0.85s forwards;
+}
+
+.plan-root.is-sketching .plan-furniture,
+.plan-root.is-sketching .plan-furn-fill {
+  opacity: 0;
+  animation: sketch-fill 0.45s var(--ease-smooth-out) 1.05s forwards;
+}
+
+.plan-root.is-sketching .plan-room-label,
+.plan-root.is-sketching .plan-dim,
+.plan-root.is-sketching .plan-muted-fill {
+  opacity: 0;
+  animation: sketch-fill 0.4s var(--ease-smooth-out) 1.45s forwards;
+}
+
+.plan-root.is-sketching .plan-frame,
+.plan-root.is-sketching .plan-grid {
+  opacity: 0;
+  animation: sketch-fill 0.5s var(--ease-smooth-out) 0.05s forwards;
+}
+
+@keyframes sketch-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sketch-stroke {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sketch-fill {
+  to {
+    opacity: 1;
+  }
+}
+
+.theme-blueprint .plan-furn-fill,
+.theme-blueprint .plan-furn-fill.plan-furn-stroke {
+  fill: color-mix(in oklab, #8ec6e6 8%, transparent);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.stagger-enter {
+  animation: fade-up 400ms var(--ease-smooth-out) both;
+}
+
+.stagger-delay {
+  animation-delay: 90ms;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+
+.scan-line {
+  animation: scan 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stagger-enter,
+  .scan-line,
+  .guide-cue,
+  .live-sketch-wall,
+  .plan-root.is-sketching .plan-room,
+  .plan-root.is-sketching .plan-room-selected,
+  .plan-root.is-sketching .plan-wall,
+  .plan-root.is-sketching .plan-ink,
+  .plan-root.is-sketching .plan-swing,
+  .plan-root.is-sketching .plan-furn-stroke,
+  .plan-root.is-sketching .plan-furniture,
+  .plan-root.is-sketching .plan-furn-fill,
+  .plan-root.is-sketching .plan-room-label,
+  .plan-root.is-sketching .plan-dim,
+  .plan-root.is-sketching .plan-muted-fill,
+  .plan-root.is-sketching .plan-frame,
+  .plan-root.is-sketching .plan-grid {
+    animation: none;
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .guide-rec-dot {
+    animation: none;
+  }
+
+  button:not(:disabled):active,
+  [role="button"]:not(:disabled):active {
+    transform: none;
+  }
+}
