@@ -23,7 +23,8 @@ function PointerUnlock() {
 /** Register the offline service worker in production builds only. */
 function OfflineCache() {
   useEffect(() => {
-    if (import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+    // The Android app ships its assets inside the APK, so it needs no SW.
+    if (import.meta.env.DEV || import.meta.env.VITE_NATIVE_APP || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").catch(() => {});
   }, []);
   return null;

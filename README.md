@@ -43,3 +43,34 @@ npm run build
 ## Stack
 
 TanStack Start, React 19, Tailwind v4, Zustand.
+
+## Android beta app (Capacitor)
+
+The field mode ships as an installable Android debug app, **Floorline Beta**
+(`com.tylerfranklin.floorline.beta`). It is a sideloaded beta, not a Play Store build.
+
+The app bundles a static SPA build (`vite.config.android.ts`, output `dist/client`)
+inside the APK, so field mode works fully offline. Anything that needs a server
+(the `/classic` AI studio, sign-in) is not available inside the app.
+
+Requirements: Node >= 20.19, JDK 17 or 21 (`JAVA_HOME`), and the Android SDK
+(`ANDROID_HOME`, with `platforms;android-35` and `build-tools;35.0.0`), or
+`android/local.properties` containing `sdk.dir=...`.
+
+| Script | What it does |
+| --- | --- |
+| `npm run build:android` | Static SPA build into `dist/client` |
+| `npm run android:sync` | Build, then copy the web assets into `android/` (`cap sync`) |
+| `npm run android:build` | Sync, then `./gradlew assembleDebug` → `android/app/build/outputs/apk/debug/app-debug.apk` |
+| `npm run android:install` | `adb install -r` that APK on a USB-connected phone |
+
+To update the app on the phone: pull, run `npm run android:build`, then reinstall it with
+`adb install -r`. Saved data is kept because the debug signing key stays the same on one
+machine. If the key changes, uninstall the app first.
+
+Notes:
+- Camera walk uses `getUserMedia`. The app declares `CAMERA`, and Capacitor's WebView asks for it the first time.
+- Photo slots use `<input capture>`, which opens the camera or file picker.
+- AR corners (WebXR `immersive-ar`) is not supported in an Android WebView. The app detects that and
+  disables it with a note. Use Chrome on Android for AR.
+- Launcher icons come from `scripts/android-icons.py` (Pillow).

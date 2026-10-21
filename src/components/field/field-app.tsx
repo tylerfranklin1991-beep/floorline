@@ -514,7 +514,7 @@ function AddRoomSheet({
             title="AR corners"
             body={
               ar === false
-                ? "Not available in this browser (needs Chrome on Android with ARCore)."
+                ? "Not available here. AR needs Chrome on Android with ARCore (not the Floorline app). Use Camera walk instead."
                 : "Point at each floor corner. Best on Android Chrome."
             }
             disabled={ar === false}

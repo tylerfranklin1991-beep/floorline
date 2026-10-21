@@ -563,7 +563,7 @@ export function PlanEditor({
       )}
       {mode !== "select" && !drag && (
         <div className="pointer-events-none absolute left-1/2 top-3 w-[90%] max-w-md -translate-x-1/2 rounded-xl bg-[#b4561d] px-4 py-3 text-center text-base font-semibold text-white shadow-lg">
-          {mode === "draw" ? "Drag on the grid to draw a room" : `Tap a wall to place the ${mode}`}
+          {mode === "draw" ? "Drag on the grid to draw a room" : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
         </div>
       )}
       <div className="absolute bottom-3 right-3 flex flex-col gap-2">

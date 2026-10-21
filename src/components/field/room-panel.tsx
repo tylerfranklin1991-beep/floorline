@@ -1,4 +1,7 @@
-import { DoorOpen, PanelTop, Trash2, X } from "lucide-react";
+import { DoorOpen, PanelTop, RectangleVertical, Trash2, X } from "lucide-react";
+
+/** User-facing name for each opening kind ("opening" reads as a doorway). */
+export const OPENING_LABEL = { door: "Door", window: "Window", opening: "Doorway" } as const;
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -194,9 +197,10 @@ export function RoomPanel({
           <button
             type="button"
             onClick={() => onPlace("opening")}
-            className="h-14 rounded-xl bg-black/5 text-base font-semibold"
+            aria-label="Doorway / opening (no door)"
+            className="flex h-14 items-center justify-center gap-2 rounded-xl bg-black/5 text-base font-semibold"
           >
-            Opening
+            <RectangleVertical className="size-5 shrink-0" /> Doorway
           </button>
         </div>
         {openings.map((o) => (
@@ -204,25 +208,25 @@ export function RoomPanel({
             key={o.id}
             className="flex flex-wrap items-center gap-2 rounded-xl bg-black/[0.03] p-2"
           >
-            <span className="w-20 text-base font-semibold capitalize">{o.kind}</span>
+            <span className="w-20 text-base font-semibold">{OPENING_LABEL[o.kind]}</span>
             <span className="text-sm text-black/50">wall {o.wall + 1}</span>
             <span className="ml-auto text-sm">width</span>
             <LengthInput
-              label={`${o.kind} width`}
+              label={`${OPENING_LABEL[o.kind]} width`}
               value={o.width}
               units={u}
               onCommit={(n) => (updateOpening(o.id, { width: n }), true)}
             />
             <span className="text-sm">from corner</span>
             <LengthInput
-              label={`${o.kind} position`}
+              label={`${OPENING_LABEL[o.kind]} position`}
               value={o.offset}
               units={u}
               onCommit={(n) => (updateOpening(o.id, { offset: n }), true)}
             />
             <button
               type="button"
-              aria-label={`Delete ${o.kind}`}
+              aria-label={`Delete ${OPENING_LABEL[o.kind].toLowerCase()}`}
               onClick={() => deleteOpening(o.id)}
               className="flex size-12 items-center justify-center rounded-full"
             >
