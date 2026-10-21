@@ -1,3 +1,4 @@
+import { carpetLayout, roomFlooring } from "@/lib/field/materials";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   area,
@@ -449,6 +450,24 @@ export function PlanEditor({
               />
             );
           })}
+          {property.showSeams !== false &&
+            property.rooms.map((room) =>
+              roomFlooring(room).material === "carpet"
+                ? carpetLayout(room, property.units).seams.map((sm, i) => (
+                    <line
+                      key={`seam${room.id}${i}`}
+                      x1={sm.a.x}
+                      y1={sm.a.y}
+                      x2={sm.b.x}
+                      y2={sm.b.y}
+                      stroke="#d0342c"
+                      strokeWidth={px(2)}
+                      strokeDasharray={`${px(8)} ${px(5)}`}
+                      pointerEvents="none"
+                    />
+                  ))
+                : null,
+            )}
           {property.openings.map((o) => {
             const room = property.rooms.find((r) => r.id === o.roomId);
             const seg = room && openingSegment(room, o);

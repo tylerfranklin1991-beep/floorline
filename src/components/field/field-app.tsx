@@ -47,6 +47,9 @@ import {
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
 import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
+import { MaterialsScreen } from "./materials-screen";
+import { sharePdf } from "@/lib/field/pdf";
+import { areaSummary } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
 import { RoomPanel } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
@@ -227,6 +230,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [focusWall, setFocusWall] = useState<number | null>(null);
   const [photo, setPhoto] = useState<{ roomId: string; photoId: string } | null>(null);
   const [menu, setMenu] = useState(false);
+  const [showMaterials, setShowMaterials] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
@@ -354,6 +358,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       </div>
 
       <LevelBar property={full} levelId={levelId} />
+
+      <AreaBar property={full} levelId={levelId} onOpen={() => setShowMaterials(true)} />
 
       <div className="relative min-h-0 flex-1">
         <PlanEditor
@@ -503,7 +509,42 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
 
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
+      {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
     </div>
+  );
+}
+
+/** Always-visible live square footage: this floor, whole property, and a Materials shortcut. */
+function AreaBar({
+  property,
+  levelId,
+  onOpen,
+}: {
+  property: FieldProperty;
+  levelId: string;
+  onOpen: () => void;
+}) {
+  const s = areaSummary(property);
+  const lvl = s.levels.find((l) => l.id === levelId);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex min-h-12 items-center gap-3 border-b border-black/10 bg-[#fff8ec] px-3 text-left text-base"
+      aria-label="Open materials summary"
+    >
+      {property.levels.length > 1 && lvl && (
+        <span>
+          {lvl.name} <b>{formatArea(lvl.area, property.units)}</b>
+        </span>
+      )}
+      <span>
+        Total <b>{formatArea(s.total, property.units)}</b>
+      </span>
+      <span className="ml-auto rounded-full bg-[#b4561d] px-3 py-1 text-sm font-semibold text-white">
+        Materials
+      </span>
+    </button>
   );
 }
 
@@ -840,8 +881,14 @@ function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: 
         />
         <MethodBtn
           icon={<FileText />}
-          title="PDF"
-          body="Opens a printable page — choose “Save as PDF”."
+          title="Share PDF floor plan"
+          body="Title block, scaled plan, materials table and room snapshots."
+          onClick={run(() => sharePdf(property), "PDF ready")}
+        />
+        <MethodBtn
+          icon={<FileText />}
+          title="Printable page"
+          body="Opens a print view (browser “Save as PDF”)."
           onClick={run(() => printPdf(property), "Opened print view")}
         />
         <MethodBtn
