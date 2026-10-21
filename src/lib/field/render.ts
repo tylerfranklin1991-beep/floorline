@@ -134,8 +134,8 @@ export function renderPlanSvg(full: FieldProperty, opts: RenderOptions = {}): st
   }
   if (opts.seams ?? full.showSeams !== false) {
     for (const room of p.rooms) {
-      if (roomFlooring(room).material !== "carpet") continue;
-      for (const sm of carpetLayout(room, p.units).seams)
+      if (roomFlooring(room, p.job).material !== "carpet") continue;
+      for (const sm of carpetLayout(room, p.units, roomFlooring(room, p.job)).seams)
         parts.push(
           `<path d="M${sm.a.x} ${sm.a.y} L${sm.b.x} ${sm.b.y}" stroke="#d0342c" stroke-width="${0.08 / unit}" stroke-dasharray="${0.5 / unit} ${0.3 / unit}"/>`,
         );

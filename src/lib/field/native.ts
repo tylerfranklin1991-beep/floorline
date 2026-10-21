@@ -2,8 +2,10 @@ import { Capacitor, registerPlugin } from "@capacitor/core";
 
 type FloorlineNative = {
   shareFile: (o: { name: string; mime: string; base64: string }) => Promise<void>;
+  ensure: () => Promise<{ granted: boolean }>;
 };
-const Native = registerPlugin<FloorlineNative>("FloorlineNative");
+/** Registered once (registering twice logged a Capacitor warning on every start). */
+export const Native = registerPlugin<FloorlineNative>("FloorlineNative");
 
 export function isNativeApp(): boolean {
   try {

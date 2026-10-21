@@ -16,6 +16,7 @@ import {
   Ruler,
   ChartNoAxesColumnIncreasing as StairsIcon,
   Pencil,
+  Settings2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -35,6 +36,8 @@ import {
   parseLength,
   rectilinearize,
   rectPoints,
+  ensureClockwise,
+  lShapePoints,
   ROOM_PRESETS,
   translate,
   uid,
@@ -50,6 +53,7 @@ import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store"
 import { ArCapture } from "./ar-capture";
 import { ArCoreScan } from "./arcore-scan";
 import { MaterialsScreen } from "./materials-screen";
+import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
@@ -232,6 +236,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [focusWall, setFocusWall] = useState<number | null>(null);
   const [photo, setPhoto] = useState<{ roomId: string; photoId: string } | null>(null);
   const [menu, setMenu] = useState(false);
+  const [jobOpen, setJobOpen] = useState(false);
   const [showMaterials, setShowMaterials] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
@@ -259,7 +264,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     source: FieldRoom["source"],
     photos: PreparedPhoto[] = [],
   ) => {
-    const clean = rectilinearize(rawPoints, gridStep(property.units));
+    // Typed sizes are exact tape readings: never snap them to the drawing grid
+    // (12'7" used to become 12'6").
+    const clean =
+      source === "typed" ? ensureClockwise(rawPoints) : rectilinearize(rawPoints, gridStep(property.units));
     const origin = nextRoomOrigin(property.rooms);
     const r = newRoom(name, translate(clean, origin.x, origin.y), source);
     for (const p of photos) {
@@ -346,6 +354,9 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         </IconBtn>
         <IconBtn label="Redo" onClick={redo} disabled={!canRedo}>
           <Redo2 />
+        </IconBtn>
+        <IconBtn label="Job settings" onClick={() => setJobOpen(true)}>
+          <Settings2 />
         </IconBtn>
         <IconBtn label="Export" onClick={() => setMenu(true)}>
           <Download />
@@ -465,13 +476,15 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               setMode("draw");
               setDrawName(name);
             } else if (how === "typed" && size) {
-              void placeRoom(name, rectPoints(0, 0, size.w, size.h), "typed");
+              void placeRoom(name, size.points ?? rectPoints(0, 0, size.w, size.h), "typed");
             } else if (how === "ar" || how === "walk" || how === "walkmode" || how === "arcore") {
               setCapture({ kind: how, name });
             }
           }}
         />
       )}
+
+      {jobOpen && <JobSettingsSheet property={full} onClose={() => setJobOpen(false)} />}
 
       {capture?.kind === "ar" && (
         <ArCapture
@@ -695,19 +708,15 @@ function AddRoomSheet({
   onPick: (
     how: "ar" | "walk" | "walkmode" | "arcore" | "draw" | "typed",
     name: string,
-    size?: { w: number; h: number },
+    size?: { w: number; h: number; points?: Pt[] },
   ) => void;
 }) {
   const [name, setName] = useState("");
   const [ar, setAr] = useState<boolean | null>(null);
-  const [w, setW] = useState("");
-  const [h, setH] = useState("");
   useEffect(() => {
     void isArSupported().then(setAr);
   }, []);
   const n = name.trim() || defaultName;
-  const pw = parseLength(w, units);
-  const ph = parseLength(h, units);
 
   return (
     <Sheet title="Add a room" onClose={onClose}>
@@ -736,8 +745,9 @@ function AddRoomSheet({
             ))}
           </div>
         </div>
+        <QuickSize units={units} name={n} onPick={onPick} />
         <div className="space-y-2">
-          <div className="text-base font-semibold">How do you want to make the shape?</div>
+          <div className="text-base font-semibold">Or capture / draw the shape</div>
           {hasNativeArScan() && (
             <MethodBtn
               icon={<ScanLine />}
@@ -776,40 +786,111 @@ function AddRoomSheet({
             onClick={() => onPick("draw", n)}
           />
         </div>
-        <div className="space-y-2 rounded-2xl bg-black/[0.03] p-3">
-          <div className="flex items-center gap-2 text-base font-semibold">
-            <Ruler className="size-5" /> Quick: type the size
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              aria-label="Width"
-              inputMode="decimal"
-              value={w}
-              onChange={(e) => setW(e.target.value)}
-              placeholder={units === "ft" ? "12'" : "3.6"}
-              className="h-14 min-w-0 flex-1 rounded-xl border border-black/15 px-3 text-xl"
-            />
-            <span className="text-xl">×</span>
-            <input
-              aria-label="Length"
-              inputMode="decimal"
-              value={h}
-              onChange={(e) => setH(e.target.value)}
-              placeholder={units === "ft" ? "10'" : "3.0"}
-              className="h-14 min-w-0 flex-1 rounded-xl border border-black/15 px-3 text-xl"
-            />
-            <button
-              type="button"
-              disabled={!pw || !ph}
-              onClick={() => pw && ph && onPick("typed", n, { w: pw, h: ph })}
-              className="h-14 rounded-xl bg-black px-5 text-lg font-bold text-white disabled:opacity-30"
-            >
-              Add
-            </button>
-          </div>
-        </div>
       </div>
     </Sheet>
+  );
+}
+
+function QuickSize({
+  units,
+  name,
+  onPick,
+}: {
+  units: Units;
+  name: string;
+  onPick: (how: "typed", name: string, size: { w: number; h: number; points?: Pt[] }) => void;
+}) {
+  const [shape, setShape] = useState<"rect" | "l">("rect");
+  const [w, setW] = useState("");
+  const [h, setH] = useState("");
+  const [cw, setCw] = useState("");
+  const [ch, setCh] = useState("");
+  const [corner, setCorner] = useState<"tr" | "tl" | "br" | "bl">("tr");
+  const pw = parseLength(w, units);
+  const ph = parseLength(h, units);
+  const pcw = parseLength(cw, units);
+  const pch = parseLength(ch, units);
+  const lPts = shape === "l" && pw && ph && pcw && pch ? lShapePoints(pw, ph, pcw, pch, corner) : null;
+  const ok = shape === "rect" ? Boolean(pw && ph && pw > 0 && ph > 0) : Boolean(lPts);
+  const go = () => {
+    if (!ok || !pw || !ph) {
+      if (shape === "l" && pw && ph && pcw && pch) toast.error("The cut-out must be smaller than the room");
+      return;
+    }
+    onPick("typed", name, { w: pw, h: ph, points: lPts ?? undefined });
+  };
+  const box = "h-14 min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 text-xl";
+  const enter = (e: React.KeyboardEvent) => e.key === "Enter" && go();
+  return (
+    <div className="space-y-2 rounded-2xl bg-[#f3dcc3]/50 p-3" data-testid="quick-size">
+      <div className="flex items-center gap-2 text-base font-semibold">
+        <Ruler className="size-5" /> Fastest: type the size
+      </div>
+      <div className="flex rounded-xl bg-black/[0.05] p-1" role="radiogroup" aria-label="Room shape">
+        {(
+          [
+            ["rect", "Rectangle"],
+            ["l", "L-shape"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={shape === k}
+            onClick={() => setShape(k)}
+            className={`h-11 flex-1 rounded-lg text-base font-semibold ${shape === k ? "bg-black text-white" : ""}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <input aria-label="Width" inputMode="decimal" value={w} onChange={(e) => setW(e.target.value)} onKeyDown={enter} placeholder={units === "ft" ? "12'6\"" : "3.6"} className={box} />
+        <span className="text-xl">×</span>
+        <input aria-label="Length" inputMode="decimal" value={h} onChange={(e) => setH(e.target.value)} onKeyDown={enter} placeholder={units === "ft" ? "10'" : "3.0"} className={box} />
+      </div>
+      {shape === "l" && (
+        <>
+          <div className="text-sm text-black/60">Cut-out (the missing corner)</div>
+          <div className="flex items-center gap-2">
+            <input aria-label="Cut-out width" inputMode="decimal" value={cw} onChange={(e) => setCw(e.target.value)} onKeyDown={enter} placeholder="4'" className={box} />
+            <span className="text-xl">×</span>
+            <input aria-label="Cut-out length" inputMode="decimal" value={ch} onChange={(e) => setCh(e.target.value)} onKeyDown={enter} placeholder="3'" className={box} />
+          </div>
+          <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Cut-out corner">
+            {(
+              [
+                ["tl", "↖"],
+                ["tr", "↗"],
+                ["bl", "↙"],
+                ["br", "↘"],
+              ] as const
+            ).map(([k, a]) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={corner === k}
+                onClick={() => setCorner(k)}
+                className={`h-11 rounded-lg text-xl ${corner === k ? "bg-black text-white" : "bg-black/5"}`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <button
+        type="button"
+        disabled={!ok}
+        onClick={go}
+        className="h-14 w-full rounded-xl bg-black px-5 text-lg font-bold text-white disabled:opacity-30"
+      >
+        Add {name}
+      </button>
+      <p className="text-xs text-black/50">Exact: 12, 12.5, 12'6" or 12 6. Islands and closets: add them in the room panel.</p>
+    </div>
   );
 }
 

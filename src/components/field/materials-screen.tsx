@@ -5,12 +5,34 @@ import {
   formatLinear,
   formatYards,
   materials,
+  MATERIAL_LABEL,
   TRANSITION_LABEL,
   type TransitionType,
 } from "@/lib/field/materials";
 import { formatArea, formatLength, type FieldProperty } from "@/lib/field/model";
 import { sharePdf } from "@/lib/field/pdf";
 import { useField } from "@/lib/field/store";
+import { downloadBlob, slug } from "@/lib/field/export";
+import { jobSettings } from "@/lib/field/job";
+import { materialsCsv, materialsText, orderLines } from "@/lib/field/takeoff";
+import { JobSettingsSheet } from "./job-settings";
+
+async function copyText(t: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(t);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = t;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
 
 function Toggle({
   label,
@@ -45,7 +67,10 @@ export function MaterialsScreen({
   const change = useField((s) => s.change);
   const updateOpening = useField((s) => s.updateOpening);
   const [busy, setBusy] = useState(false);
+  const [settings, setSettings] = useState(false);
   const m = materials(property);
+  const order = orderLines(property, m);
+  const j = jobSettings(property.job);
   const u = property.units;
   const roomName = (id: string | null) =>
     property.rooms.find((r) => r.id === id)?.name ?? "outside";
@@ -60,6 +85,7 @@ export function MaterialsScreen({
       setBusy(false);
     }
   };
+  if (settings) return <JobSettingsSheet property={property} onClose={() => setSettings(false)} />;
   return (
     <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f6f2e8]">
       <header
@@ -107,6 +133,66 @@ export function MaterialsScreen({
               {m.area.steps ? ` · ${m.area.steps} steps` : ""}
             </div>
           )}
+        </section>
+
+        <section className="rounded-2xl bg-white p-4 shadow-sm" data-testid="order-list">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="text-lg font-bold">Order list</h2>
+            <button
+              type="button"
+              onClick={() => setSettings(true)}
+              className="h-11 rounded-full bg-black/5 px-4 text-base font-semibold"
+            >
+              Job settings
+            </button>
+          </div>
+          {j.customer && <div className="text-sm text-black/60">For {j.customer}</div>}
+          {order.length === 0 && <p className="text-black/60">Add rooms to see what to order.</p>}
+          <ul className="divide-y divide-black/5">
+            {order.map((l, i) => (
+              <li key={i} className="py-2">
+                <div className="flex justify-between gap-3 text-base">
+                  <span>{l.item}</span>
+                  <b className="text-right">{l.qty}</b>
+                </div>
+                {l.detail && <div className="text-xs text-black/55">{l.detail}</div>}
+              </li>
+            ))}
+          </ul>
+          {m.lvp.sqft > 0 && m.lvp.boxes == null && (
+            <button
+              type="button"
+              onClick={() => setSettings(true)}
+              className="mt-2 w-full rounded-xl bg-[#f3dcc3] p-2 text-sm font-semibold"
+            >
+              Set LVP sq ft per box to get a box count
+            </button>
+          )}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={async () =>
+                (await copyText(materialsText(property)))
+                  ? toast.success("Materials copied — paste into a text or email")
+                  : toast.error("Couldn't copy")
+              }
+              className="h-12 rounded-xl bg-black text-base font-semibold text-white"
+            >
+              Copy as text
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                void downloadBlob(
+                  `${slug(property.name)}-materials.csv`,
+                  new Blob([materialsCsv(property)], { type: "text/csv" }),
+                ).catch(() => toast.error("CSV failed"))
+              }
+              className="h-12 rounded-xl bg-black/5 text-base font-semibold"
+            >
+              Save CSV
+            </button>
+          </div>
         </section>
 
         <section className="space-y-2">
@@ -182,6 +268,7 @@ export function MaterialsScreen({
             <thead className="text-left text-black/50">
               <tr>
                 <th className="py-1">Room</th>
+                <th>Floor</th>
                 <th>Area</th>
                 <th>Base</th>
                 <th>Seams</th>
@@ -191,6 +278,7 @@ export function MaterialsScreen({
               {m.rooms.map((r) => (
                 <tr key={r.room.id} className="border-t border-black/5">
                   <td className="py-2 font-semibold">{r.room.name}</td>
+                  <td>{MATERIAL_LABEL[r.flooring.material]}</td>
                   <td>{formatArea(r.area, u)}</td>
                   <td>{formatLinear(r.baseboard, u)}</td>
                   <td>{r.layout ? r.layout.seams.length : "—"}</td>

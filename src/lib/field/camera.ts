@@ -9,7 +9,8 @@
  *  - Tracks end when the app goes to the background; callers must reopen on
  *    resume (see useCamera).
  */
-import { Capacitor, registerPlugin } from "@capacitor/core";
+import { Capacitor } from "@capacitor/core";
+import { Native } from "./native.ts";
 
 export type CameraError = {
   code: "insecure" | "unsupported" | "denied" | "busy" | "none" | "unknown";
@@ -52,8 +53,7 @@ export function describeCameraError(err: unknown, native = isNative()): CameraEr
   return { code: "unknown", message: "Couldn't start the camera. Tap Retry." };
 }
 
-type CameraPermissionPlugin = { ensure: () => Promise<{ granted: boolean }> };
-const CameraPermission = registerPlugin<CameraPermissionPlugin>("FloorlineNative");
+const CameraPermission = Native;
 
 /** Native runtime permission (no-op on the web, where the browser prompts). */
 export async function ensureCameraPermission(): Promise<boolean> {

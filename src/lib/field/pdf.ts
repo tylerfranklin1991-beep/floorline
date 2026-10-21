@@ -9,6 +9,8 @@ import {
 } from "./materials";
 import { area, formatArea, formatLength, levelView, type FieldProperty } from "./model";
 import { loadPhotoBlob } from "./photos";
+import { jobSettings } from "./job";
+import { orderLines, roomRows } from "./takeoff";
 import { planFrame, renderPlanSvg } from "./render";
 
 /** Standard drawing scales: [label, paper inches per plan unit]. */
@@ -90,7 +92,10 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
     doc.text(full.name || "Floor plan", M + 0.15, M + 0.35);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    if (full.address) doc.text(full.address, M + 0.15, M + 0.58);
+    const j = jobSettings(full.job);
+    const who = [j.customer, j.phone].filter(Boolean).join(" · ");
+    const line2 = [who, full.address].filter(Boolean).join(" — ");
+    if (line2) doc.text(doc.splitTextToSize(line2, 5) as string[], M + 0.15, M + 0.58);
     doc.text(`Floor: ${floor}`, M + 0.15, M + 0.8);
     doc.text(`Date: ${date}`, PW - M - 0.15, M + 0.35, { align: "right" });
     if (extra) doc.text(extra, PW - M - 0.15, M + 0.58, { align: "right" });
@@ -148,6 +153,8 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
     summaryTable(doc, materials(full), full, M, M + 1.15, PW - 2 * M, true);
   }
 
+  installerSheet(doc, full, titleBlock, levels.length > 1 ? "All floors" : levels[0].name);
+
   // Snapshots page.
   const withPhotos = full.rooms.filter((r) => r.photos.length);
   if (withPhotos.length) {
@@ -188,6 +195,73 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
   return doc.output("blob");
 }
 
+/** Installer page(s): job info, order list, per-room cut sheet, stairs, notes. */
+function installerSheet(
+  doc: jsPDF,
+  p: FieldProperty,
+  titleBlock: (floor: string, extra?: string) => void,
+  floor: string,
+) {
+  const M = 0.5;
+  const W = 7.5;
+  const j = jobSettings(p.job);
+  doc.addPage();
+  titleBlock(floor, "Installer cut sheet");
+  let y = M + 1.25;
+  const need = (h: number) => {
+    if (y + h > 10.5) {
+      doc.addPage();
+      y = M + 0.2;
+    }
+  };
+  const write = (t: string, size = 10, bold = false, indent = 0) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(t, W - indent) as string[];
+    need(lines.length * size * 0.0165 + 0.04);
+    doc.text(lines, M + indent, y);
+    y += lines.length * size * 0.0165 + 0.04;
+  };
+  const info = [
+    j.customer && `Customer: ${j.customer}`,
+    j.phone && `Phone: ${j.phone}`,
+    j.email && `Email: ${j.email}`,
+    p.address && `Address: ${p.address}`,
+    j.installDate && `Install: ${j.installDate}`,
+  ].filter(Boolean) as string[];
+  if (info.length) write(info.join("   "), 10, true);
+  if (j.jobNotes) write(`Job notes: ${j.jobNotes}`);
+  y += 0.1;
+  write("ORDER", 12, true);
+  for (const l of orderLines(p)) {
+    write(`[ ]  ${l.item}: ${l.qty}`, 10, true, 0.1);
+    if (l.detail) write(l.detail, 8.5, false, 0.45);
+  }
+  y += 0.1;
+  write("ROOMS", 12, true);
+  doc.setLineWidth(0.01);
+  for (const r of roomRows(p)) {
+    need(0.6);
+    doc.line(M, y - 0.12, M + W, y - 0.12);
+    write(
+      `${r.name}${p.levels.length > 1 ? ` (${r.level})` : ""} — ${r.material} ${r.area}${r.waste ? ` · waste ${r.waste}` : ""}${r.direction ? ` · ${r.direction}` : ""}`,
+      10.5,
+      true,
+    );
+    if (r.cuts.length)
+      write(
+        `Cuts: ${r.cuts.join(",  ")}   Seams: ${r.seams}${r.seamOffset ? ` (first seam ${r.seamOffset} from wall)` : ""}`,
+        9,
+        false,
+        0.2,
+      );
+    if (r.areas.length) write(`Areas: ${r.areas.join(",  ")}${r.excluded ? ` (excluded ${r.excluded})` : ""}`, 9, false, 0.2);
+    write(`Base: ${r.baseboard}${r.quarterRound ? `   Quarter round: ${r.quarterRound}` : ""}`, 9, false, 0.2);
+    if (r.notes) write(`Note: ${r.notes}`, 9, false, 0.2);
+    y += 0.08;
+  }
+}
+
 function summaryTable(
   doc: jsPDF,
   m: Materials,
@@ -219,7 +293,7 @@ function summaryTable(
     const row = [
       `${r.room.name}${lvl}`,
       formatArea(r.area, u),
-      r.flooring.material === "carpet" ? "Carpet" : r.flooring.material === "hard" ? "Hard" : "—",
+      r.flooring.material === "carpet" ? "Carpet" : r.flooring.material === "hard" ? "LVP" : "—",
       cuts,
       formatLinear(r.baseboard, u),
       r.quarterRound ? formatLinear(r.quarterRound, u) : "—",

@@ -452,8 +452,8 @@ export function PlanEditor({
           })}
           {property.showSeams !== false &&
             property.rooms.map((room) =>
-              roomFlooring(room).material === "carpet"
-                ? carpetLayout(room, property.units).seams.map((sm, i) => (
+              roomFlooring(room, property.job).material === "carpet"
+                ? carpetLayout(room, property.units, roomFlooring(room, property.job)).seams.map((sm, i) => (
                     <line
                       key={`seam${room.id}${i}`}
                       x1={sm.a.x}

@@ -17,18 +17,14 @@ import {
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
 import {
-  baseboard,
-  carpetLayout,
-  formatLinear,
   roomFlooring,
-  ROLL_WIDTHS_FT,
   TRANSITION_LABEL,
   transitions,
-  type FloorMaterial,
   type RoomFlooring,
   type TransitionType,
 } from "@/lib/field/materials";
 import { PhotoSlots } from "./photo-slots";
+import { AreasSection, FlooringSection } from "./room-flooring";
 
 const WALL_NAMES = (room: FieldRoom) =>
   edges(room.points).map((e) => {
@@ -99,6 +95,9 @@ export function RoomPanel({
 }) {
   const updateRoom = useField((s) => s.updateRoom);
   const deleteRoom = useField((s) => s.deleteRoom);
+  const preview = useField((s) => s.preview);
+  const beginDrag = useField((s) => s.beginDrag);
+  const commitDrag = useField((s) => s.commitDrag);
   const updateOpening = useField((s) => s.updateOpening);
   const deleteOpening = useField((s) => s.deleteOpening);
   const [name, setName] = useState(room.name);
@@ -106,10 +105,9 @@ export function RoomPanel({
   const names = WALL_NAMES(room);
   const openings = property.openings.filter((o) => o.roomId === room.id);
   const u = property.units;
-  const fl = roomFlooring(room);
+  const fl = roomFlooring(room, property.job);
   const setFl = (patch: Partial<RoomFlooring>) =>
     updateRoom(room.id, { flooring: { ...(room.flooring ?? {}), ...patch } });
-  const lay = fl.material === "carpet" ? carpetLayout(room, u, fl) : null;
   const trs = transitions(property);
 
   return (
@@ -302,110 +300,9 @@ export function RoomPanel({
         ))}
       </section>
 
-      <section className="space-y-3">
-        <h3 className="text-base font-bold">Flooring &amp; trim</h3>
-        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Floor material">
-          {(
-            [
-              ["carpet", "Carpet"],
-              ["hard", "Hard / tile"],
-              ["none", "No floor"],
-            ] as [FloorMaterial, string][]
-          ).map(([m, label]) => (
-            <button
-              key={m}
-              type="button"
-              role="radio"
-              aria-checked={fl.material === m}
-              onClick={() => setFl({ material: m })}
-              className={`h-12 rounded-xl text-base font-semibold ${fl.material === m ? "bg-black text-white" : "bg-black/5"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {fl.material === "carpet" && (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm">Roll</span>
-              {ROLL_WIDTHS_FT.map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  aria-pressed={fl.rollWidthFt === w}
-                  onClick={() => setFl({ rollWidthFt: w })}
-                  className={`h-11 rounded-full px-4 text-base font-semibold ${fl.rollWidthFt === w ? "bg-[#b4561d] text-white" : "bg-black/5"}`}
-                >
-                  {u === "ft" ? `${w}'` : `${(w * 0.3048).toFixed(2)} m`}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setFl({ pileDeg: (fl.pileDeg + 90) % 360 })}
-                className="h-11 rounded-full bg-black/5 px-4 text-base font-semibold"
-                aria-label="Rotate pile direction"
-              >
-                Pile {["→", "↓", "←", "↑"][Math.round(fl.pileDeg / 90) % 4]} rotate
-              </button>
-            </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <label className="flex items-center gap-1">
-                Trim/end (in)
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  className="h-11 w-16 rounded-xl border border-black/15 bg-white px-2 text-base"
-                  value={fl.trimIn}
-                  onChange={(e) => setFl({ trimIn: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </label>
-              <label className="flex items-center gap-1">
-                Waste %
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  className="h-11 w-16 rounded-xl border border-black/15 bg-white px-2 text-base"
-                  value={fl.wastePct}
-                  onChange={(e) => setFl({ wastePct: Math.max(0, Number(e.target.value) || 0) })}
-                />
-              </label>
-            </div>
-            {lay && (
-              <ul className="rounded-xl bg-black/[0.03] p-2 text-sm">
-                {lay.cuts.map((c, i) => (
-                  <li key={i}>
-                    Cut {i + 1}: {formatLength(c.length, u)} × {formatLength(c.width, u)}
-                    {c.fill ? " (fill)" : ""}
-                  </li>
-                ))}
-                <li className="font-semibold">
-                  {lay.seams.length} seam{lay.seams.length === 1 ? "" : "s"} ·{" "}
-                  {formatLinear(lay.length, u)} before waste
-                </li>
-              </ul>
-            )}
-          </>
-        )}
-        <div className="flex items-center justify-between rounded-xl bg-black/[0.03] p-2 text-sm">
-          <span>
-            Baseboard <b>{formatLinear(baseboard(property, room), u)}</b>
-            <span className="block text-xs text-black/50">
-              Untick “base” on a wall to skip it (cabinets)
-            </span>
-          </span>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              className="size-5"
-              checked={fl.quarterRound}
-              onChange={(e) => setFl({ quarterRound: e.target.checked })}
-            />
-            Quarter round
-          </label>
-        </div>
-      </section>
+      <FlooringSection property={property} room={room} />
+
+      <AreasSection property={property} room={room} />
 
       <section className="space-y-2">
         <h3 className="text-base font-bold">4 · Photos</h3>
@@ -421,9 +318,16 @@ export function RoomPanel({
           aria-label="Room notes"
           defaultValue={room.notes}
           key={room.id}
-          onBlur={(e) =>
-            e.target.value !== room.notes && updateRoom(room.id, { notes: e.target.value })
-          }
+          // Saved on every keystroke (one undo step per edit) so closing the app mid-note loses nothing.
+          onFocus={() => beginDrag()}
+          onChange={(e) => {
+            const v = e.target.value;
+            preview((p) => ({
+              ...p,
+              rooms: p.rooms.map((r) => (r.id === room.id ? { ...r, notes: v } : r)),
+            }));
+          }}
+          onBlur={() => commitDrag()}
           className="min-h-20 w-full rounded-xl border border-black/15 bg-white p-3 text-base"
           placeholder="Flooring, damage, outlets…"
         />

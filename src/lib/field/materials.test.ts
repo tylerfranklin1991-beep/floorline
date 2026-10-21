@@ -175,7 +175,8 @@ test("carpet order: fills reused across rooms, LF and SY with waste", () => {
   assert.equal(packed.linear, 58); // 20 + 18 + one 20' piece carrying both fills (3'+4')
   assert.equal(packed.pieces.length, 3);
   p.rooms[0].flooring = { trimIn: 0, wastePct: 10 };
-  assert.equal(carpetOrder(p)[0].linear, 63.8);
+  // Waste is per room now: A's 20' drop and the shared fill piece get 10%, B's drop 0%.
+  assert.equal(carpetOrder(p)[0].linear, 62);
 });
 
 test("packRoll never overfills the roll width", () => {
@@ -257,5 +258,7 @@ function carpetDefaults() {
     wastePct: 5,
     noBaseWalls: [],
     quarterRound: false,
+    seamOffsetFt: 0,
+    plankDeg: 0,
   };
 }
