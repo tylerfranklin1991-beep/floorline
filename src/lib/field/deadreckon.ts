@@ -21,13 +21,26 @@ export class StepDetector {
   private lastStep = -Infinity;
   constructor(
     private threshold = 1.1,
-    private minGapMs = 280,
+    private minGapMs = 330,
+    /** Spikes above this (phone bumped or shaken) are ignored, not counted. */
+    private maxLinear = 9,
   ) {}
+  /** Forget filter state, e.g. after the app was in the background. */
+  reset() {
+    this.gravity = 9.81;
+    this.smooth = 0;
+    this.armed = true;
+    this.lastStep = -Infinity;
+  }
   /** Feed one sample; returns true when a step is detected. */
   push(magnitude: number, tMs: number): boolean {
     if (!Number.isFinite(magnitude)) return false;
     this.gravity += (magnitude - this.gravity) * 0.02;
     const lin = magnitude - this.gravity;
+    if (Math.abs(lin) > this.maxLinear) {
+      this.armed = false;
+      return false;
+    }
     this.smooth += (lin - this.smooth) * 0.35;
     if (this.armed && this.smooth > this.threshold && tMs - this.lastStep >= this.minGapMs) {
       this.armed = false;
@@ -50,13 +63,39 @@ export function compassHeading(e: {
   return (360 - e.alpha) % 360;
 }
 
-/** Circular exponential smoothing of headings (degrees). */
+/** Smallest signed difference a - b in degrees, in (-180, 180]. */
+export function angleDiff(a: number, b: number): number {
+  let d = (((a - b) % 360) + 360) % 360;
+  if (d > 180) d -= 360;
+  return d;
+}
+
+/**
+ * Circular exponential smoothing of headings (degrees). Large sudden jumps
+ * (magnetometer glitches near metal, axis flips) are damped until they persist
+ * for a few samples, so one bad reading no longer kinks the walked path.
+ */
 export class HeadingFilter {
   private x = 0;
   private y = 0;
   private has = false;
-  constructor(private k = 0.25) {}
+  private outliers = 0;
+  constructor(
+    private k = 0.25,
+    private jumpDeg = 60,
+    private jumpSamples = 4,
+  ) {}
+  reset() {
+    this.has = false;
+    this.outliers = 0;
+  }
   push(deg: number): number {
+    if (!Number.isFinite(deg)) return this.value() ?? 0;
+    const cur = this.value();
+    if (cur != null && Math.abs(angleDiff(deg, cur)) > this.jumpDeg) {
+      this.outliers += 1;
+      if (this.outliers < this.jumpSamples) return cur;
+    } else this.outliers = 0;
     const r = (deg * Math.PI) / 180;
     if (!this.has) {
       this.x = Math.cos(r);
@@ -72,6 +111,16 @@ export class HeadingFilter {
     if (!this.has) return null;
     return ((Math.atan2(this.y, this.x) * 180) / Math.PI + 360) % 360;
   }
+}
+
+/**
+ * Pull a relative heading onto the nearest 90° axis when it is within
+ * `snapDeg` of it: most walls are square, so this removes slow compass wobble
+ * from straight runs without hiding real turns.
+ */
+export function snapToAxis(relDeg: number, snapDeg = 12): number {
+  const axis = Math.round(relDeg / 90) * 90;
+  return Math.abs(relDeg - axis) <= snapDeg ? axis : relDeg;
 }
 
 /**

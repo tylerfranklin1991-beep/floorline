@@ -1,4 +1,15 @@
-import { DoorOpen, Footprints, Pause, Play, Ruler, Undo2, X } from "lucide-react";
+import {
+  Camera,
+  DoorOpen,
+  Footprints,
+  Pause,
+  Play,
+  Ruler,
+  Undo2,
+  Video,
+  VideoOff,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   advance,
@@ -9,6 +20,7 @@ import {
   FT_PER_M,
   HeadingFilter,
   roomFromTrace,
+  snapToAxis,
   StepDetector,
   strideFromCalibration,
 } from "@/lib/field/deadreckon";
@@ -17,13 +29,22 @@ import {
   defaultOpeningWidth,
   formatLength,
   gridStep,
+  MAX_PHOTOS_PER_ROOM,
   parseLength,
   type Pt,
   type Units,
 } from "@/lib/field/model";
+import { prepareFromSource, type PreparedPhoto } from "@/lib/field/photos";
+import { useCamera } from "@/lib/field/use-camera";
 
 /** A walked room in plan space; `door.at` is where you left it (room frame), `raw` the path point. */
-export type WalkRoom = { name: string; points: Pt[]; door: { at: Pt; raw: Pt } | null };
+export type WalkRoom = {
+  name: string;
+  points: Pt[];
+  door: { at: Pt; raw: Pt } | null;
+  /** Snapshots taken while walking this room (max MAX_PHOTOS_PER_ROOM). */
+  photos?: PreparedPhoto[];
+};
 const STRIDE_KEY = "floorline-stride-m";
 
 function loadStrideM(): number {
@@ -80,10 +101,16 @@ export function WalkMode({
   const [calib, setCalib] = useState<null | { steps: number; on: boolean; dist: string }>(null);
   const [frameAngle, setFrameAngle] = useState<number | null>(null);
   const [gotMotion, setGotMotion] = useState(false);
+  const [camOn, setCamOn] = useState(false);
+  const [photos, setPhotos] = useState<PreparedPhoto[]>([]);
+  const video = useRef<HTMLVideoElement>(null);
+  const cam = useCamera(video, camOn);
 
   const st = useRef({
     detector: new StepDetector(),
-    filter: new HeadingFilter(0.2),
+    filter: new HeadingFilter(0.12),
+    lastHeadingUi: 0,
+    gotMotion: false,
     start: null as number | null,
     pos: { x: 0, y: 0 } as Pt,
     running: false,
@@ -99,8 +126,11 @@ export function WalkMode({
     const onMotion = (e: DeviceMotionEvent) => {
       const a = e.accelerationIncludingGravity;
       if (!a || a.x == null || a.y == null || a.z == null) return;
-      setGotMotion(true);
       const s = st.current;
+      if (!s.gotMotion) {
+        s.gotMotion = true;
+        setGotMotion(true);
+      }
       if (!s.detector.push(Math.hypot(a.x, a.y, a.z), performance.now())) return;
       if (s.calibrating) {
         setCalib((c) => (c ? { ...c, steps: c.steps + 1 } : c));
@@ -110,7 +140,7 @@ export function WalkMode({
       const h = s.filter.value();
       if (h == null) return;
       if (s.start == null) s.start = h;
-      s.pos = advance(s.pos, h - s.start, s.stride);
+      s.pos = advance(s.pos, snapToAxis(h - s.start), s.stride);
       setSteps((n) => n + 1);
       setTrace((t) => [...t, s.pos]);
     };
@@ -120,24 +150,69 @@ export function WalkMode({
       else if (sawAbsolute) return;
       const h = compassHeading(e as DeviceOrientationEvent & { webkitCompassHeading?: number });
       if (h == null) return;
-      setHeading(st.current.filter.push(h));
+      const v = st.current.filter.push(h);
+      // Re-rendering the plan on every 60 Hz sensor event made the UI stutter.
+      const now = performance.now();
+      if (now - st.current.lastHeadingUi > 100) {
+        st.current.lastHeadingUi = now;
+        setHeading(v);
+      }
     };
     const abs = onOrient(true);
     const rel = onOrient(false);
     window.addEventListener("devicemotion", onMotion);
     window.addEventListener("deviceorientationabsolute" as "deviceorientation", abs);
     window.addEventListener("deviceorientation", rel);
-    let lock: { release: () => Promise<void> } | null = null;
-    void (
-      navigator as Navigator & { wakeLock?: { request: (t: string) => Promise<typeof lock> } }
-    ).wakeLock
-      ?.request("screen")
-      .then((l) => (lock = l))
-      .catch(() => {});
-    return () => {
+    // The screen wake lock is dropped by the browser whenever the page is
+    // hidden, so take it again every time we come back.
+    type Lock = { release: () => Promise<void>; released?: boolean };
+    let lock: Lock | null = null;
+    let disposed = false;
+    const takeLock = () => {
+      const wl = (navigator as Navigator & { wakeLock?: { request: (t: string) => Promise<Lock> } })
+        .wakeLock;
+      if (!wl || (lock && !lock.released)) return;
+      wl.request("screen")
+        .then((l) => {
+          if (disposed) void l.release().catch(() => {});
+          else lock = l;
+        })
+        .catch(() => {});
+    };
+    const attach = () => {
+      window.addEventListener("devicemotion", onMotion);
+      window.addEventListener("deviceorientationabsolute" as "deviceorientation", abs);
+      window.addEventListener("deviceorientation", rel);
+    };
+    const detach = () => {
       window.removeEventListener("devicemotion", onMotion);
       window.removeEventListener("deviceorientationabsolute" as "deviceorientation", abs);
       window.removeEventListener("deviceorientation", rel);
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        // Steps taken while away can't be tracked: pause so the path stays honest.
+        if (st.current.running) {
+          setRunning(false);
+          setSensorMsg("Walk paused while the app was in the background. Tap Resume.");
+        }
+        return;
+      }
+      // Resume: fresh sensor state and listeners (some WebViews stop delivering after a pause).
+      detach();
+      st.current.detector.reset();
+      st.current.filter.reset();
+      sawAbsolute = false;
+      attach();
+      takeLock();
+    };
+    attach();
+    takeLock();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      disposed = true;
+      detach();
+      document.removeEventListener("visibilitychange", onVis);
       void lock?.release().catch(() => {});
     };
   }, [started]);
@@ -160,6 +235,17 @@ export function WalkMode({
     setSensorMsg(null);
     setStarted(true);
     setRunning(true);
+  };
+
+  const snapshot = async () => {
+    if (!video.current || cam.status !== "live" || photos.length >= MAX_PHOTOS_PER_ROOM) return;
+    try {
+      const p = await prepareFromSource(video.current);
+      setPhotos((x) => (x.length >= MAX_PHOTOS_PER_ROOM ? x : [...x, p]));
+      navigator.vibrate?.(40);
+    } catch {
+      setSensorMsg("Camera isn't ready yet — try the snapshot again.");
+    }
   };
 
   const grid = gridStep(units);
@@ -188,7 +274,8 @@ export function WalkMode({
     navigator.vibrate?.([30, 40, 30]);
     setSensorMsg(null);
     const { at, ...room } = r;
-    setRooms((x) => [...x, { ...room, door: { at, raw: st.current.pos } }]);
+    setRooms((x) => [...x, { ...room, photos, door: { at, raw: st.current.pos } }]);
+    setPhotos([]);
     setTrace([st.current.pos]);
   };
 
@@ -199,6 +286,8 @@ export function WalkMode({
       return;
     }
     setRooms((x) => x.slice(0, -1));
+    // Re-walking that room: its snapshots come back to it.
+    setPhotos(last.photos ?? []);
     // Back to standing in the doorway, ready to re-walk the next room.
     const back = last.door?.raw ?? st.current.pos;
     setTrace([back]);
@@ -208,7 +297,9 @@ export function WalkMode({
 
   const finish = () => {
     const r = closeRoom();
-    const all: WalkRoom[] = r ? [...rooms, { name: r.name, points: r.points, door: null }] : rooms;
+    const all: WalkRoom[] = r
+      ? [...rooms, { name: r.name, points: r.points, door: null, photos }]
+      : rooms;
     if (!all.length) {
       setSensorMsg("Walk around at least one room first.");
       return;
@@ -321,13 +412,62 @@ export function WalkMode({
         </div>
         <button
           type="button"
-          onClick={onCancel}
+          onClick={() => setCamOn((v) => !v)}
+          aria-label={camOn ? "Hide camera" : "Show camera"}
+          aria-pressed={camOn}
+          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-white/10"
+        >
+          {camOn ? <VideoOff /> : <Video />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            // One mis-tap used to throw away every walked room.
+            if ((rooms.length > 0 || trace.length > 5) && !window.confirm("Discard this walk?"))
+              return;
+            onCancel();
+          }}
           aria-label="Cancel walk"
           className="flex size-12 items-center justify-center rounded-full bg-white/10"
         >
           <X />
         </button>
       </div>
+
+      {camOn && (
+        <div className="relative mx-3 h-[32vh] shrink-0 overflow-hidden rounded-xl bg-black">
+          <video ref={video} playsInline muted className="h-full w-full object-cover" />
+          {cam.status !== "live" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center text-base text-white/80">
+              <p>
+                {cam.status === "error"
+                  ? cam.error
+                  : cam.status === "starting"
+                    ? "Starting camera…"
+                    : "Camera is off."}
+              </p>
+              {cam.status !== "starting" && (
+                <button
+                  type="button"
+                  onClick={() => void cam.start()}
+                  className="h-12 rounded-xl bg-[#b4561d] px-5 font-bold text-white"
+                >
+                  Tap to start camera
+                </button>
+              )}
+              <p className="text-xs text-white/60">Walk tracking keeps working without it.</p>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={snapshot}
+            disabled={cam.status !== "live" || photos.length >= MAX_PHOTOS_PER_ROOM}
+            className="absolute bottom-2 right-2 flex h-12 items-center gap-2 rounded-full bg-black/70 px-4 font-bold disabled:opacity-40"
+          >
+            <Camera className="size-5" /> Snapshot {photos.length}/{MAX_PHOTOS_PER_ROOM}
+          </button>
+        </div>
+      )}
 
       <div className="relative min-h-0 flex-1">
         <svg viewBox={vb} className="h-full w-full">

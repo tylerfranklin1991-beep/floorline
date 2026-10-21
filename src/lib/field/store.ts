@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { commit, initHistory, redo as redoH, undo as undoH, type History } from "./history";
 import {
   convertProperty,
@@ -56,6 +56,50 @@ type FieldState = {
 
 let dragBase: FieldProperty | null = null;
 
+/** Called when the phone's storage is full and a save could not be written. */
+export let onSaveError: (err: unknown) => void = () => {};
+export function setOnSaveError(fn: (err: unknown) => void) {
+  onSaveError = fn;
+}
+
+/** localStorage that reports (instead of throwing from inside set()) when full. */
+export const safeStorage = {
+  getItem: (k: string) => {
+    try {
+      return globalThis.localStorage?.getItem(k) ?? null;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (k: string, v: string) => {
+    try {
+      globalThis.localStorage?.setItem(k, v);
+    } catch (err) {
+      onSaveError(err);
+    }
+  },
+  removeItem: (k: string) => {
+    try {
+      globalThis.localStorage?.removeItem(k);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
+/** A property id not already used (importing the same file twice made duplicates). */
+export function uniqueId(id: string, taken: Set<string>): string {
+  if (!taken.has(id)) return id;
+  let n = 1;
+  while (taken.has(`${id}-copy${n > 1 ? n : ""}`)) n += 1;
+  return `${id}-copy${n > 1 ? n : ""}`;
+}
+
+/** Keep the shown level valid after undo/redo removed or restored levels. */
+export function validLevel(p: FieldProperty, levelId: string | null): string | null {
+  return p.levels.some((l) => l.id === levelId) ? levelId : (p.levels[0]?.id ?? null);
+}
+
 function writeBack(state: FieldState, present: FieldProperty) {
   const stamped = { ...present, updatedAt: Date.now() };
   return {
@@ -110,17 +154,26 @@ export const useField = create<FieldState>()(
             currentLevelId: p?.levels[0]?.id ?? null,
           });
         },
-        deleteProperty: (id) =>
+        deleteProperty: (id) => {
+          // Free the full-size photos too (they used to stay in IndexedDB forever).
+          const gone = get().properties.find((p) => p.id === id);
+          if (gone && typeof indexedDB !== "undefined")
+            void import("./photos").then(({ deletePhotoBlob }) =>
+              gone.rooms
+                .flatMap((r) => r.photos)
+                .forEach((ph) => void deletePhotoBlob(ph.id).catch(() => {})),
+            );
           set({
             properties: get().properties.filter((p) => p.id !== id),
             ...(get().currentId === id ? { currentId: null, history: null } : {}),
-          }),
+          });
+        },
         importProperty: (value) => {
           const p = sanitizeProperty(value);
           if (!p) return false;
           const copy = {
             ...p,
-            id: get().properties.some((x) => x.id === p.id) ? `${p.id}-copy` : p.id,
+            id: uniqueId(p.id, new Set(get().properties.map((x) => x.id))),
           };
           set({ properties: [copy, ...get().properties] });
           return true;
@@ -148,13 +201,37 @@ export const useField = create<FieldState>()(
           const h = get().history;
           if (!h) return;
           const next = undoH(h);
-          set({ history: next, properties: writeBack(get(), next.present).properties });
+          const levelId = validLevel(next.present, get().currentLevelId);
+          set({
+            history: next,
+            properties: writeBack(get(), next.present).properties,
+            ...(levelId !== get().currentLevelId
+              ? {
+                  currentLevelId: levelId,
+                  selectedRoomId: null,
+                  selectedOpeningId: null,
+                  selectedStairsId: null,
+                }
+              : {}),
+          });
         },
         redo: () => {
           const h = get().history;
           if (!h) return;
           const next = redoH(h);
-          set({ history: next, properties: writeBack(get(), next.present).properties });
+          const levelId = validLevel(next.present, get().currentLevelId);
+          set({
+            history: next,
+            properties: writeBack(get(), next.present).properties,
+            ...(levelId !== get().currentLevelId
+              ? {
+                  currentLevelId: levelId,
+                  selectedRoomId: null,
+                  selectedOpeningId: null,
+                  selectedStairsId: null,
+                }
+              : {}),
+          });
         },
         select: (roomId, openingId = null) =>
           set({ selectedRoomId: roomId, selectedOpeningId: openingId, selectedStairsId: null }),
@@ -240,6 +317,7 @@ export const useField = create<FieldState>()(
     {
       name: "floorline-field-v1",
       version: 1,
+      storage: createJSONStorage(() => safeStorage),
       partialize: (s) => ({ properties: s.properties, currentId: s.currentId }),
       merge: (persisted, currentState) => {
         const data = (persisted ?? {}) as Partial<FieldState>;
