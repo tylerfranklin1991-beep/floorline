@@ -1,5 +1,5 @@
 import { area, formatArea, type FieldProperty } from "./model";
-import { renderPlanSvg } from "./render";
+import { renderLevelSvgs } from "./render";
 
 export function slug(s: string) {
   return (
@@ -21,21 +21,40 @@ export function downloadBlob(filename: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/** One PNG with every level stacked top to bottom. */
 export async function planPngBlob(p: FieldProperty): Promise<Blob> {
-  const svg = renderPlanSvg(p);
-  const img = new Image();
-  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  await img.decode();
+  const imgs = await Promise.all(
+    renderLevelSvgs(p)
+      // Skip empty extra levels so a one-floor house still exports one plan.
+      .filter(
+        ({ level }, i) =>
+          i === 0 ||
+          p.rooms.some((r) => r.levelId === level.id) ||
+          p.stairs.some((s) => s.levelId === level.id),
+      )
+      .map(async ({ svg }) => {
+        const img = new Image();
+        img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        await img.decode();
+        return img;
+      }),
+  );
+  const W = Math.max(...imgs.map((i) => i.width));
+  const H = imgs.reduce((s, i) => s + i.height, 0);
   const maxEdge = 4096;
-  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const scale = Math.min(1, maxEdge / Math.max(W, H));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.width * scale);
-  canvas.height = Math.round(img.height * scale);
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas unavailable");
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  let y = 0;
+  for (const img of imgs) {
+    ctx.drawImage(img, 0, y * scale, img.width * scale, img.height * scale);
+    y += img.height;
+  }
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("PNG encode failed"))), "image/png"),
   );
@@ -67,11 +86,13 @@ export async function sharePng(p: FieldProperty): Promise<boolean> {
 
 /** Printable page (plan + room photo list). Use the print dialog's "Save as PDF". */
 export function printPdf(p: FieldProperty) {
-  const svg = renderPlanSvg(p);
+  const svg = renderLevelSvgs(p)
+    .map(({ svg }) => `<div class="level">${svg}</div>`)
+    .join("");
   const rows = p.rooms
     .map(
       (r) =>
-        `<div class="room"><h3>${escapeHtml(r.name)} <small>${formatArea(area(r.points), p.units)}</small></h3>${r.photos
+        `<div class="room"><h3>${escapeHtml(r.name)} <small>${p.levels.length > 1 ? `${escapeHtml(p.levels.find((l) => l.id === r.levelId)?.name ?? "")} · ` : ""}${formatArea(area(r.points), p.units)}</small></h3>${r.photos
           .map((ph) => `<img src="${ph.thumb}"/>`)
           .join("")}${r.notes ? `<p>${escapeHtml(r.notes)}</p>` : ""}</div>`,
     )
@@ -79,6 +100,7 @@ export function printPdf(p: FieldProperty) {
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(p.name)}</title><style>
 body{font-family:Helvetica,Arial,sans-serif;margin:16px;color:#111}
 .plan svg{width:100%;height:auto;max-height:95vh}
+.level+.level{page-break-before:always}
 .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;page-break-before:always}
 .room img{width:48%;margin-right:2%;border-radius:4px}
 h3{margin:4px 0} small{color:#666;font-weight:400}

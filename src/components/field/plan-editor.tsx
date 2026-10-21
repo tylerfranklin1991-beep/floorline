@@ -13,7 +13,12 @@ import {
   moveWall,
   nearestWall,
   newRoom,
+  newStairs,
   openingSegment,
+  stairsArrow,
+  stairsLabel,
+  stairsRect,
+  stairsTreads,
   pointInPolygon,
   rectPoints,
   snap,
@@ -24,7 +29,7 @@ import {
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
 
-export type EditorMode = "select" | "draw" | "door" | "window" | "opening";
+export type EditorMode = "select" | "draw" | "door" | "window" | "opening" | "stairs";
 
 type View = { scale: number; tx: number; ty: number };
 
@@ -34,6 +39,7 @@ type Drag =
   | { kind: "corner"; roomId: string; index: number; points: Pt[] }
   | { kind: "wall"; roomId: string; index: number; start: Pt; points: Pt[] }
   | { kind: "draw"; start: Pt; end: Pt }
+  | { kind: "stairs"; id: string; start: Pt; x: number; y: number }
   | { kind: "pinch"; d0: number; mid0: Pt; view: View };
 
 const HANDLE_PX = 22;
@@ -67,6 +73,10 @@ export function PlanEditor({
   const commitDrag = useField((s) => s.commitDrag);
   const addRoom = useField((s) => s.addRoom);
   const addOpening = useField((s) => s.addOpening);
+  const selectedStairsId = useField((s) => s.selectedStairsId);
+  const selectStairs = useField((s) => s.selectStairs);
+  const addStairs = useField((s) => s.addStairs);
+  const currentLevelId = useField((s) => s.currentLevelId);
   const step = gridStep(property.units);
   const unitPx = property.units === "ft" ? 1 : 3.2808;
 
@@ -80,7 +90,16 @@ export function PlanEditor({
   }, []);
 
   const fit = useCallback(() => {
-    const pts = property.rooms.flatMap((r) => r.points);
+    const pts = [
+      ...property.rooms.flatMap((r) => r.points),
+      ...property.stairs.flatMap((st) => {
+        const r = stairsRect(st);
+        return [
+          { x: r.x, y: r.y },
+          { x: r.x + r.w, y: r.y + r.h },
+        ];
+      }),
+    ];
     const b = pts.length ? bbox(pts) : { minX: 0, minY: 0, w: 20 / unitPx, h: 16 / unitPx };
     const pad = 56;
     const scale = Math.max(
@@ -141,6 +160,17 @@ export function PlanEditor({
       setDrag({ kind: "draw", start: s, end: s });
       return;
     }
+    if (mode === "stairs") {
+      addStairs(
+        newStairs(
+          currentLevelId ?? property.levels[0].id,
+          { x: snap(p.x, step), y: snap(p.y, step) },
+          property.units,
+        ),
+      );
+      onModeDone();
+      return;
+    }
     if (mode === "door" || mode === "window" || mode === "opening") {
       const candidates = selectedRoomId
         ? property.rooms
@@ -195,6 +225,16 @@ export function PlanEditor({
       onPhotoTap(room.id, target!.dataset.photo!);
       return;
     }
+    const st = [...property.stairs].reverse().find((x) => {
+      const r = stairsRect(x);
+      return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+    });
+    if (st) {
+      selectStairs(st.id);
+      beginDrag();
+      setDrag({ kind: "stairs", id: st.id, start: p, x: st.x, y: st.y });
+      return;
+    }
     const hit = roomAt(p);
     if (hit) {
       select(hit.id);
@@ -203,6 +243,7 @@ export function PlanEditor({
       return;
     }
     select(null);
+    selectStairs(null);
     setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view });
   };
 
@@ -259,6 +300,15 @@ export function PlanEditor({
       setRoomPoints(drag.roomId, next);
       return;
     }
+    if (drag.kind === "stairs") {
+      const x = drag.x + snap(p.x - drag.start.x, step);
+      const y = drag.y + snap(p.y - drag.start.y, step);
+      preview((prop) => ({
+        ...prop,
+        stairs: prop.stairs.map((st) => (st.id === drag.id ? { ...st, x, y } : st)),
+      }));
+      return;
+    }
     if (drag.kind === "corner") {
       setRoomPoints(
         drag.roomId,
@@ -297,7 +347,13 @@ export function PlanEditor({
       setDrag(null);
       return;
     }
-    if (drag.kind === "room" || drag.kind === "corner" || drag.kind === "wall") commitDrag();
+    if (
+      drag.kind === "room" ||
+      drag.kind === "corner" ||
+      drag.kind === "wall" ||
+      drag.kind === "stairs"
+    )
+      commitDrag();
     setDrag(null);
   };
 
@@ -364,6 +420,19 @@ export function PlanEditor({
       data-testid="plan-editor"
     >
       <svg width={size.w} height={size.h} className="block">
+        <defs>
+          <marker
+            id="fl-arrow"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="4"
+            markerHeight="4"
+            orient="auto-start-reverse"
+          >
+            <path d="M0 0 L10 5 L0 10 z" fill="#8a3b12" />
+          </marker>
+        </defs>
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.scale})`}>
           {lines}
           {property.rooms.map((room) => {
@@ -413,6 +482,77 @@ export function PlanEditor({
                     stroke="#1c1b18"
                     strokeWidth={px(1.5)}
                   />
+                )}
+              </g>
+            );
+          })}
+          {property.stairs.map((st) => {
+            const r = stairsRect(st);
+            const isSel = st.id === selectedStairsId;
+            const a = stairsArrow(st);
+            const fs = Math.max(px(13), Math.min(0.9 / unitPx, px(20)));
+            const to = st.toLevelId
+              ? property.levels.find((l) => l.id === st.toLevelId)?.name
+              : undefined;
+            return (
+              <g key={st.id} data-testid="stairs">
+                <rect
+                  x={r.x}
+                  y={r.y}
+                  width={r.w}
+                  height={r.h}
+                  fill={isSel ? "#efe2c6" : "#ffffff"}
+                  stroke={isSel ? "#b4561d" : "#1c1b18"}
+                  strokeWidth={px(isSel ? 4 : 2.5)}
+                />
+                {stairsTreads(st, property.units).map((t, i) => (
+                  <line
+                    key={i}
+                    x1={t.a.x}
+                    y1={t.a.y}
+                    x2={t.b.x}
+                    y2={t.b.y}
+                    stroke="#6b665c"
+                    strokeWidth={px(1.2)}
+                  />
+                ))}
+                <line
+                  x1={a.from.x}
+                  y1={a.from.y}
+                  x2={a.to.x}
+                  y2={a.to.y}
+                  stroke="#8a3b12"
+                  strokeWidth={px(3)}
+                  markerEnd="url(#fl-arrow)"
+                />
+                <text
+                  x={r.x + r.w / 2}
+                  y={r.y + r.h / 2 + fs * 0.35}
+                  fontSize={fs}
+                  fontWeight={800}
+                  textAnchor="middle"
+                  fill="#1c1b18"
+                  stroke="#fff"
+                  strokeWidth={px(4)}
+                  paintOrder="stroke"
+                  pointerEvents="none"
+                >
+                  {stairsLabel(st)}
+                </text>
+                {to && (
+                  <text
+                    x={r.x + r.w / 2}
+                    y={r.y + r.h / 2 + fs * 1.4}
+                    fontSize={fs * 0.7}
+                    textAnchor="middle"
+                    fill="#5c574d"
+                    stroke="#fff"
+                    strokeWidth={px(3)}
+                    paintOrder="stroke"
+                    pointerEvents="none"
+                  >
+                    to {to}
+                  </text>
                 )}
               </g>
             );
@@ -563,7 +703,11 @@ export function PlanEditor({
       )}
       {mode !== "select" && !drag && (
         <div className="pointer-events-none absolute left-1/2 top-3 w-[90%] max-w-md -translate-x-1/2 rounded-xl bg-[#b4561d] px-4 py-3 text-center text-base font-semibold text-white shadow-lg">
-          {mode === "draw" ? "Drag on the grid to draw a room" : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
+          {mode === "draw"
+            ? "Drag on the grid to draw a room"
+            : mode === "stairs"
+              ? "Tap where the stairs go"
+              : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
         </div>
       )}
       <div className="absolute bottom-3 right-3 flex flex-col gap-2">

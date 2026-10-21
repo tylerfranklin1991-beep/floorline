@@ -14,6 +14,8 @@ import {
   Upload,
   Footprints,
   Ruler,
+  ChartNoAxesColumnIncreasing as StairsIcon,
+  Pencil,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -23,6 +25,8 @@ import {
   area,
   formatArea,
   gridStep,
+  levelView,
+  nextLevelName,
   nextRoomOrigin,
   newRoom,
   parseLength,
@@ -41,6 +45,7 @@ import { useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
 import { PlanEditor, type EditorMode } from "./plan-editor";
 import { RoomPanel } from "./room-panel";
+import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 
 export function FieldApp() {
@@ -182,7 +187,16 @@ function HomeScreen() {
 
 type Capture = null | { kind: "ar" | "walk"; name: string };
 
-function PropertyScreen({ property }: { property: FieldProperty }) {
+function PropertyScreen({ property: full }: { property: FieldProperty }) {
+  const storedLevelId = useField((s) => s.currentLevelId);
+  // Undo can remove the level you were on; fall back to the first one.
+  const levelId = full.levels.some((l) => l.id === storedLevelId)
+    ? storedLevelId!
+    : full.levels[0].id;
+  const property = levelView(full, levelId);
+  const selectedStairsId = useField((s) => s.selectedStairsId);
+  const selectStairs = useField((s) => s.selectStairs);
+  const stairs = property.stairs.find((x) => x.id === selectedStairsId) ?? null;
   const openProperty = useField((s) => s.openProperty);
   const change = useField((s) => s.change);
   const undo = useField((s) => s.undo);
@@ -282,6 +296,8 @@ function PropertyScreen({ property }: { property: FieldProperty }) {
         ))}
       </div>
 
+      <LevelBar property={full} levelId={levelId} />
+
       <div className="relative min-h-0 flex-1">
         <PlanEditor
           property={property}
@@ -311,7 +327,14 @@ function PropertyScreen({ property }: { property: FieldProperty }) {
         )}
       </div>
 
-      {room ? (
+      {stairs ? (
+        <div
+          className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
+          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        >
+          <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
+        </div>
+      ) : room ? (
         <div
           className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
@@ -330,7 +353,7 @@ function PropertyScreen({ property }: { property: FieldProperty }) {
         </div>
       ) : (
         <div
-          className="grid grid-cols-[1fr_auto] gap-2 border-t border-black/10 bg-white p-3"
+          className="grid grid-cols-[1fr_auto_auto] gap-2 border-t border-black/10 bg-white p-3"
           style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
         >
           <button
@@ -339,6 +362,16 @@ function PropertyScreen({ property }: { property: FieldProperty }) {
             className="flex h-16 items-center justify-center gap-2 rounded-2xl bg-[#b4561d] text-xl font-bold text-white"
           >
             <Plus /> Add room
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("stairs");
+              select(null);
+            }}
+            className="flex h-16 flex-col items-center justify-center rounded-2xl bg-black/5 px-3 text-sm font-semibold"
+          >
+            <StairsIcon className="size-5" /> Stairs
           </button>
           <button
             type="button"
@@ -399,7 +432,70 @@ function PropertyScreen({ property }: { property: FieldProperty }) {
       )}
 
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
-      {menu && <ExportSheet property={property} onClose={() => setMenu(false)} />}
+      {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
+    </div>
+  );
+}
+
+function LevelBar({ property, levelId }: { property: FieldProperty; levelId: string }) {
+  const setLevel = useField((s) => s.setLevel);
+  const addLevel = useField((s) => s.addLevel);
+  const renameLevel = useField((s) => s.renameLevel);
+  const deleteLevel = useField((s) => s.deleteLevel);
+  const current = property.levels.find((l) => l.id === levelId);
+  const edit = () => {
+    if (!current) return;
+    const name = window.prompt(
+      property.levels.length > 1
+        ? `Rename "${current.name}" (leave empty and OK to delete this level)`
+        : `Rename "${current.name}"`,
+      current.name,
+    );
+    if (name === null) return;
+    if (!name.trim() && property.levels.length > 1) {
+      const n = property.rooms.filter((r) => r.levelId === levelId).length;
+      if (
+        window.confirm(
+          `Delete ${current.name}${n ? ` and its ${n} room(s)` : ""}? You can undo this.`,
+        )
+      )
+        deleteLevel(levelId);
+      return;
+    }
+    renameLevel(levelId, name);
+  };
+  return (
+    <div
+      className="flex items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
+      role="tablist"
+      aria-label="Levels"
+    >
+      {property.levels.map((l) => {
+        const on = l.id === levelId;
+        return (
+          <button
+            key={l.id}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => (on ? edit() : setLevel(l.id))}
+            className={`flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-4 text-base font-semibold ${on ? "bg-black text-white" : "bg-black/5"}`}
+          >
+            {l.name}
+            {on && <Pencil className="size-4 opacity-70" aria-label="Rename" />}
+          </button>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => {
+          const name = window.prompt("Name the new level", nextLevelName(property));
+          if (name !== null) addLevel(name || nextLevelName(property));
+        }}
+        className="flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-black/30 px-4 text-base font-semibold"
+      >
+        <Plus className="size-4" /> Level
+      </button>
     </div>
   );
 }

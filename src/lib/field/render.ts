@@ -5,25 +5,47 @@ import {
   edges,
   formatArea,
   formatLength,
+  levelView,
   openingSegment,
+  stairsArrow,
+  stairsLabel,
+  stairsPoints,
+  stairsRect,
+  stairsTreads,
   type FieldProperty,
 } from "./model.ts";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export type RenderOptions = { photos?: boolean; pxPerUnit?: number; title?: boolean };
+export type RenderOptions = {
+  photos?: boolean;
+  pxPerUnit?: number;
+  title?: boolean;
+  /** Draw only this level (title gets the level name when there are several). */
+  levelId?: string;
+};
+
+/** One SVG per level, in level order. A single-level property gives one SVG. */
+export function renderLevelSvgs(p: FieldProperty, opts: Omit<RenderOptions, "levelId"> = {}) {
+  return p.levels.map((l) => ({ level: l, svg: renderPlanSvg(p, { ...opts, levelId: l.id }) }));
+}
 
 /** Plan bounds with a margin for wall labels, in plan units. */
 export function planFrame(p: FieldProperty, margin = 3) {
-  if (p.rooms.length === 0)
+  if (p.rooms.length === 0 && (p.stairs ?? []).length === 0)
     return { x: -margin, y: -margin, w: 20 + margin * 2, h: 16 + margin * 2 };
-  const b = bbox(p.rooms.flatMap((r) => r.points));
+  const b = bbox([...p.rooms.flatMap((r) => r.points), ...(p.stairs ?? []).flatMap(stairsPoints)]);
   return { x: b.minX - margin, y: b.minY - margin, w: b.w + margin * 2, h: b.h + margin * 2 };
 }
 
 /** Standalone SVG of the plan (for PNG/PDF export). Pure string, no DOM. */
-export function renderPlanSvg(p: FieldProperty, opts: RenderOptions = {}): string {
+export function renderPlanSvg(full: FieldProperty, opts: RenderOptions = {}): string {
+  const p = opts.levelId ? levelView(full, opts.levelId) : full;
+  const levelTitle =
+    opts.levelId && full.levels.length > 1
+      ? full.levels.find((l) => l.id === opts.levelId)?.name
+      : undefined;
   const unit = p.units === "ft" ? 1 : 3.2808;
   const titleH = opts.title === false ? 0 : 3 / unit;
   const f = planFrame(p, 3 / unit);
@@ -40,7 +62,7 @@ export function renderPlanSvg(p: FieldProperty, opts: RenderOptions = {}): strin
   );
   if (opts.title !== false) {
     parts.push(
-      `<text x="${f.x + 0.6 / unit}" y="${f.y - titleH + 1.3 / unit}" font-size="${1.0 / unit}" font-weight="700" fill="#111">${esc(p.name)}</text>`,
+      `<text x="${f.x + 0.6 / unit}" y="${f.y - titleH + 1.3 / unit}" font-size="${1.0 / unit}" font-weight="700" fill="#111">${esc(p.name)}${levelTitle ? ` · ${esc(levelTitle)}` : ""}</text>`,
     );
     if (p.address)
       parts.push(
@@ -72,6 +94,38 @@ export function renderPlanSvg(p: FieldProperty, opts: RenderOptions = {}): strin
         );
       }
     }
+  }
+  for (const st of p.stairs ?? []) {
+    const r = stairsRect(st);
+    const sw = 0.06 / unit;
+    parts.push(
+      `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="#ffffff" stroke="#1b1b1b" stroke-width="${0.12 / unit}"/>`,
+    );
+    for (const t of stairsTreads(st, p.units))
+      parts.push(
+        `<path d="M${t.a.x} ${t.a.y} L${t.b.x} ${t.b.y}" stroke="#555" stroke-width="${sw}"/>`,
+      );
+    const a = stairsArrow(st);
+    const hx = a.to.x - a.from.x;
+    const hy = a.to.y - a.from.y;
+    const hl = Math.hypot(hx, hy) || 1;
+    const k = Math.min(r.w, r.h) * 0.3;
+    const ux = hx / hl;
+    const uy = hy / hl;
+    const back = { x: a.to.x - ux * k, y: a.to.y - uy * k };
+    parts.push(
+      `<path d="M${a.from.x} ${a.from.y} L${a.to.x} ${a.to.y} M${back.x - uy * k * 0.6} ${back.y + ux * k * 0.6} L${a.to.x} ${a.to.y} L${back.x + uy * k * 0.6} ${back.y - ux * k * 0.6}" fill="none" stroke="#8a3b12" stroke-width="${sw * 1.6}"/>`,
+    );
+    const to = st.toLevelId ? full.levels.find((l) => l.id === st.toLevelId)?.name : undefined;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    parts.push(
+      `<text x="${cx}" y="${cy + font * 0.35}" font-size="${font}" font-weight="700" text-anchor="middle" fill="#111" stroke="#fff" stroke-width="${font * 0.25}" paint-order="stroke">${stairsLabel(st)}</text>`,
+    );
+    if (to)
+      parts.push(
+        `<text x="${cx}" y="${cy + font * 1.4}" font-size="${font * 0.75}" text-anchor="middle" fill="#555" stroke="#fff" stroke-width="${font * 0.2}" paint-order="stroke">to ${esc(to)}</text>`,
+      );
   }
   for (const room of p.rooms) {
     const c = centroid(room.points);

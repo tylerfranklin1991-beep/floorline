@@ -27,6 +27,34 @@ export interface FieldRoom {
   notes: string;
   /** How the shape was made, shown so the user knows how much to trust it. */
   source: "ar" | "walk" | "draw" | "typed";
+  /** Level (floor) this room is on. */
+  levelId: string;
+}
+
+export interface FieldLevel {
+  id: string;
+  name: string;
+}
+
+/** Direction the stairs arrow points (the way you walk when going UP/DOWN). */
+export type StairsHeading = "n" | "e" | "s" | "w";
+
+export interface FieldStairs {
+  id: string;
+  levelId: string;
+  /** Top-left corner of the footprint. */
+  x: number;
+  y: number;
+  /** Across the treads. */
+  width: number;
+  /** Along the run (the arrow direction). */
+  length: number;
+  heading: StairsHeading;
+  direction: "up" | "down";
+  /** Step count typed by the user (never auto-detected). */
+  steps: number | null;
+  /** Level the stairs lead to, if linked. */
+  toLevelId: string | null;
 }
 
 export interface FieldOpening {
@@ -47,6 +75,9 @@ export interface FieldProperty {
   units: Units;
   rooms: FieldRoom[];
   openings: FieldOpening[];
+  /** Floors, bottom to top is up to the user; there is always at least one. */
+  levels: FieldLevel[];
+  stairs: FieldStairs[];
   createdAt: number;
   updatedAt: number;
 }
@@ -67,6 +98,8 @@ export const ROOM_PRESETS = [
   "Entry",
   "Other",
 ];
+
+export const LEVEL_PRESETS = ["Basement", "Main", "2nd floor", "3rd floor", "Attic"];
 
 export function uid(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-4)}`;
@@ -103,13 +136,172 @@ export function newProperty(name: string, units: Units = "ft"): FieldProperty {
     units,
     rooms: [],
     openings: [],
+    levels: [{ id: "level-main", name: "Main" }],
+    stairs: [],
     createdAt: now,
     updatedAt: now,
   };
 }
 
-export function newRoom(name: string, points: Pt[], source: FieldRoom["source"]): FieldRoom {
-  return { id: uid("room"), name: name.trim() || "Room", points, photos: [], notes: "", source };
+export function newRoom(
+  name: string,
+  points: Pt[],
+  source: FieldRoom["source"],
+  levelId = "level-main",
+): FieldRoom {
+  return {
+    id: uid("room"),
+    name: name.trim() || "Room",
+    points,
+    photos: [],
+    notes: "",
+    source,
+    levelId,
+  };
+}
+
+/* --------------------------------------------------------------- levels */
+
+/** The property as seen on one level: only that level's rooms, openings and stairs. */
+export function levelView(p: FieldProperty, levelId: string): FieldProperty {
+  const rooms = p.rooms.filter((r) => r.levelId === levelId);
+  const ids = new Set(rooms.map((r) => r.id));
+  return {
+    ...p,
+    rooms,
+    openings: p.openings.filter((o) => ids.has(o.roomId)),
+    stairs: p.stairs.filter((s) => s.levelId === levelId),
+  };
+}
+
+export function levelName(p: FieldProperty, levelId: string | null): string {
+  return p.levels.find((l) => l.id === levelId)?.name ?? "";
+}
+
+/** Suggested name for the next level ("Basement", "2nd floor", ...). */
+export function nextLevelName(p: FieldProperty): string {
+  const used = new Set(p.levels.map((l) => l.name.toLowerCase()));
+  return LEVEL_PRESETS.find((n) => !used.has(n.toLowerCase())) ?? `Level ${p.levels.length + 1}`;
+}
+
+/** Remove a level and everything on it. Refuses to remove the last level. */
+export function removeLevel(p: FieldProperty, levelId: string): FieldProperty {
+  if (p.levels.length <= 1 || !p.levels.some((l) => l.id === levelId)) return p;
+  const rooms = p.rooms.filter((r) => r.levelId !== levelId);
+  const ids = new Set(rooms.map((r) => r.id));
+  return {
+    ...p,
+    levels: p.levels.filter((l) => l.id !== levelId),
+    rooms,
+    openings: p.openings.filter((o) => ids.has(o.roomId)),
+    stairs: p.stairs
+      .filter((s) => s.levelId !== levelId)
+      .map((s) => (s.toLevelId === levelId ? { ...s, toLevelId: null } : s)),
+  };
+}
+
+/* --------------------------------------------------------------- stairs */
+
+export function newStairs(levelId: string, at: Pt, units: Units): FieldStairs {
+  const w = units === "ft" ? 3 : 0.9;
+  const l = units === "ft" ? 10 : 3;
+  return {
+    id: uid("stairs"),
+    levelId,
+    x: round2(at.x - w / 2),
+    y: round2(at.y - l / 2),
+    width: w,
+    length: l,
+    heading: "n",
+    direction: "up",
+    steps: null,
+    toLevelId: null,
+  };
+}
+
+/** Footprint rectangle in plan space (width/length swap when the run is east-west). */
+export function stairsRect(s: FieldStairs) {
+  const ns = s.heading === "n" || s.heading === "s";
+  return { x: s.x, y: s.y, w: ns ? s.width : s.length, h: ns ? s.length : s.width };
+}
+
+export function stairsPoints(s: FieldStairs): Pt[] {
+  const r = stairsRect(s);
+  return rectPoints(r.x, r.y, r.w, r.h);
+}
+
+/** Plan label, e.g. "UP 14" or "DN". */
+export function stairsLabel(s: FieldStairs): string {
+  return `${s.direction === "up" ? "UP" : "DN"}${s.steps ? ` ${s.steps}` : ""}`;
+}
+
+/** Tread lines across the run; uses the typed step count, else ~1 per 10 in / 25 cm. */
+export function stairsTreads(s: FieldStairs, units: Units): { a: Pt; b: Pt }[] {
+  const r = stairsRect(s);
+  const ns = s.heading === "n" || s.heading === "s";
+  const tread = units === "ft" ? 10 / 12 : 0.25;
+  const n = Math.max(2, Math.min(40, s.steps ?? Math.round(s.length / tread)));
+  const out: { a: Pt; b: Pt }[] = [];
+  for (let i = 1; i < n; i++) {
+    const t = i / n;
+    out.push(
+      ns
+        ? { a: { x: r.x, y: r.y + r.h * t }, b: { x: r.x + r.w, y: r.y + r.h * t } }
+        : { a: { x: r.x + r.w * t, y: r.y }, b: { x: r.x + r.w * t, y: r.y + r.h } },
+    );
+  }
+  return out;
+}
+
+/** Arrow along the run's centre line, from tail to head (head is the heading side). */
+export function stairsArrow(s: FieldStairs): { from: Pt; to: Pt } {
+  const r = stairsRect(s);
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const m = 0.12;
+  switch (s.heading) {
+    case "n":
+      return { from: { x: cx, y: r.y + r.h * (1 - m) }, to: { x: cx, y: r.y + r.h * m } };
+    case "s":
+      return { from: { x: cx, y: r.y + r.h * m }, to: { x: cx, y: r.y + r.h * (1 - m) } };
+    case "e":
+      return { from: { x: r.x + r.w * m, y: cy }, to: { x: r.x + r.w * (1 - m), y: cy } };
+    default:
+      return { from: { x: r.x + r.w * (1 - m), y: cy }, to: { x: r.x + r.w * m, y: cy } };
+  }
+}
+
+/** Turn the arrow 90° clockwise about the footprint centre. */
+export function rotateStairs(s: FieldStairs): FieldStairs {
+  const r = stairsRect(s);
+  const next: StairsHeading = ({ n: "e", e: "s", s: "w", w: "n" } as const)[s.heading];
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const rotated = { ...s, heading: next };
+  const r2 = stairsRect(rotated);
+  return { ...rotated, x: round2(cx - r2.w / 2), y: round2(cy - r2.h / 2) };
+}
+
+export function sanitizeStairs(v: unknown, levelIds: Set<string>, fallback: string) {
+  if (!v || typeof v !== "object") return null;
+  const s = v as Partial<FieldStairs>;
+  if (typeof s.id !== "string") return null;
+  const num = (n: unknown, d: number) => (Number.isFinite(n) && Number(n) > 0 ? Number(n) : d);
+  const steps = Number(s.steps);
+  return {
+    id: s.id,
+    levelId: typeof s.levelId === "string" && levelIds.has(s.levelId) ? s.levelId : fallback,
+    x: Number.isFinite(s.x) ? Number(s.x) : 0,
+    y: Number.isFinite(s.y) ? Number(s.y) : 0,
+    width: num(s.width, 3),
+    length: num(s.length, 10),
+    heading: (["n", "e", "s", "w"] as const).includes(s.heading as StairsHeading)
+      ? (s.heading as StairsHeading)
+      : "n",
+    direction: s.direction === "down" ? "down" : "up",
+    steps: Number.isInteger(steps) && steps > 0 && steps < 100 ? steps : null,
+    toLevelId: typeof s.toLevelId === "string" && levelIds.has(s.toLevelId) ? s.toLevelId : null,
+  } satisfies FieldStairs;
 }
 
 export type Edge = { a: Pt; b: Pt; index: number; length: number; horizontal: boolean };
@@ -551,6 +743,13 @@ export function convertProperty(p: FieldProperty, units: Units): FieldProperty {
     units,
     rooms: p.rooms.map((r) => ({ ...r, points: r.points.map((q) => ({ x: c(q.x), y: c(q.y) })) })),
     openings: p.openings.map((o) => ({ ...o, offset: c(o.offset), width: c(o.width) })),
+    stairs: p.stairs.map((s) => ({
+      ...s,
+      x: c(s.x),
+      y: c(s.y),
+      width: c(s.width),
+      length: c(s.length),
+    })),
   };
 }
 
@@ -559,6 +758,15 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<FieldProperty>;
   if (typeof v.id !== "string" || !Array.isArray(v.rooms)) return null;
+  // Saves from before levels existed get a single "Main" level.
+  const levels: FieldLevel[] = Array.isArray(v.levels)
+    ? v.levels
+        .filter((l) => l && typeof l.id === "string")
+        .map((l) => ({ id: l.id, name: typeof l.name === "string" && l.name ? l.name : "Level" }))
+    : [];
+  if (levels.length === 0) levels.push({ id: "level-main", name: "Main" });
+  const levelIds = new Set(levels.map((l) => l.id));
+  const fallback = levels[0].id;
   const rooms: FieldRoom[] = [];
   for (const r of v.rooms) {
     if (!r || typeof r.id !== "string" || !Array.isArray(r.points)) continue;
@@ -573,6 +781,7 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
         : [],
       notes: typeof r.notes === "string" ? r.notes : "",
       source: r.source ?? "draw",
+      levelId: typeof r.levelId === "string" && levelIds.has(r.levelId) ? r.levelId : fallback,
     });
   }
   const ids = new Set(rooms.map((r) => r.id));
@@ -583,6 +792,12 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     units: v.units === "m" ? "m" : "ft",
     rooms,
     openings: Array.isArray(v.openings) ? v.openings.filter((o) => o && ids.has(o.roomId)) : [],
+    levels,
+    stairs: Array.isArray(v.stairs)
+      ? v.stairs
+          .map((s) => sanitizeStairs(s, levelIds, fallback))
+          .filter((s): s is FieldStairs => Boolean(s))
+      : [],
     createdAt: Number(v.createdAt) || Date.now(),
     updatedAt: Number(v.updatedAt) || Date.now(),
   };

@@ -73,4 +73,5 @@ Notes:
 - Photo slots use `<input capture>`, which opens the camera or file picker.
 - AR corners (WebXR `immersive-ar`) is not supported in an Android WebView. The app detects that and
   disables it with a note. Use Chrome on Android for AR.
+- Levels and stairs are part of field mode, so they work the same in the app and in the browser.
 - Launcher icons come from `scripts/android-icons.py` (Pillow).

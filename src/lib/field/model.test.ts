@@ -163,6 +163,7 @@ describe("lengths", () => {
       photos: [],
       notes: "",
       source: "draw",
+      levelId: "level-main",
     });
     const m = convertProperty(p, "m");
     assert.equal(m.rooms[0].points[2].x, 3.05);

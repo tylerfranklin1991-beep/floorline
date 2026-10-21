@@ -4,6 +4,9 @@ import { commit, initHistory, redo as redoH, undo as undoH, type History } from 
 import {
   convertProperty,
   newProperty,
+  removeLevel,
+  uid,
+  type FieldStairs,
   sanitizeProperty,
   type FieldOpening,
   type FieldProperty,
@@ -18,6 +21,9 @@ type FieldState = {
   history: History<FieldProperty> | null;
   selectedRoomId: string | null;
   selectedOpeningId: string | null;
+  selectedStairsId: string | null;
+  /** Level shown in the editor (not persisted; the first level on open). */
+  currentLevelId: string | null;
   createProperty: (name: string, units: Units) => string;
   openProperty: (id: string | null) => void;
   deleteProperty: (id: string) => void;
@@ -38,6 +44,14 @@ type FieldState = {
   updateOpening: (id: string, patch: Partial<FieldOpening>) => void;
   deleteOpening: (id: string) => void;
   setUnits: (units: Units) => void;
+  setLevel: (id: string) => void;
+  addLevel: (name: string) => string;
+  renameLevel: (id: string, name: string) => void;
+  deleteLevel: (id: string) => void;
+  selectStairs: (id: string | null) => void;
+  addStairs: (stairs: FieldStairs) => void;
+  updateStairs: (id: string, patch: Partial<FieldStairs>) => void;
+  deleteStairs: (id: string) => void;
 };
 
 let dragBase: FieldProperty | null = null;
@@ -70,6 +84,8 @@ export const useField = create<FieldState>()(
         history: null,
         selectedRoomId: null,
         selectedOpeningId: null,
+        selectedStairsId: null,
+        currentLevelId: null,
         createProperty: (name, units) => {
           const p = newProperty(name, units);
           set({
@@ -78,6 +94,8 @@ export const useField = create<FieldState>()(
             history: initHistory(p),
             selectedRoomId: null,
             selectedOpeningId: null,
+            selectedStairsId: null,
+            currentLevelId: p.levels[0].id,
           });
           return p.id;
         },
@@ -88,6 +106,8 @@ export const useField = create<FieldState>()(
             history: p ? initHistory(p) : null,
             selectedRoomId: null,
             selectedOpeningId: null,
+            selectedStairsId: null,
+            currentLevelId: p?.levels[0]?.id ?? null,
           });
         },
         deleteProperty: (id) =>
@@ -137,8 +157,13 @@ export const useField = create<FieldState>()(
           set({ history: next, properties: writeBack(get(), next.present).properties });
         },
         select: (roomId, openingId = null) =>
-          set({ selectedRoomId: roomId, selectedOpeningId: openingId }),
+          set({ selectedRoomId: roomId, selectedOpeningId: openingId, selectedStairsId: null }),
         addRoom: (room) => {
+          const p0 = current();
+          const levelId = p0?.levels.some((l) => l.id === get().currentLevelId)
+            ? get().currentLevelId!
+            : (p0?.levels[0]?.id ?? room.levelId);
+          room = { ...room, levelId };
           get().change((p) => ({ ...p, rooms: [...p.rooms, room] }));
           set({ selectedRoomId: room.id, selectedOpeningId: null });
         },
@@ -169,6 +194,47 @@ export const useField = create<FieldState>()(
           set({ selectedOpeningId: null });
         },
         setUnits: (units) => get().change((p) => convertProperty(p, units)),
+        setLevel: (id) =>
+          set({
+            currentLevelId: id,
+            selectedRoomId: null,
+            selectedOpeningId: null,
+            selectedStairsId: null,
+          }),
+        addLevel: (name) => {
+          const id = uid("level");
+          get().change((p) => ({
+            ...p,
+            levels: [...p.levels, { id, name: name.trim() || "Level" }],
+          }));
+          get().setLevel(id);
+          return id;
+        },
+        renameLevel: (id, name) =>
+          get().change((p) => ({
+            ...p,
+            levels: p.levels.map((l) => (l.id === id ? { ...l, name: name.trim() || l.name } : l)),
+          })),
+        deleteLevel: (id) => {
+          get().change((p) => removeLevel(p, id));
+          const p = current();
+          if (p && get().currentLevelId === id) get().setLevel(p.levels[0].id);
+        },
+        selectStairs: (id) =>
+          set({ selectedStairsId: id, selectedRoomId: null, selectedOpeningId: null }),
+        addStairs: (stairs) => {
+          get().change((p) => ({ ...p, stairs: [...p.stairs, stairs] }));
+          get().selectStairs(stairs.id);
+        },
+        updateStairs: (id, patch) =>
+          get().change((p) => ({
+            ...p,
+            stairs: p.stairs.map((x) => (x.id === id ? { ...x, ...patch } : x)),
+          })),
+        deleteStairs: (id) => {
+          get().change((p) => ({ ...p, stairs: p.stairs.filter((x) => x.id !== id) }));
+          set({ selectedStairsId: null });
+        },
       };
     },
     {
@@ -186,6 +252,7 @@ export const useField = create<FieldState>()(
           properties,
           currentId: open?.id ?? null,
           history: open ? initHistory(open) : null,
+          currentLevelId: open?.levels[0]?.id ?? null,
         };
       },
     },

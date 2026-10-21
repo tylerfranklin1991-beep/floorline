@@ -13,6 +13,7 @@ describe("renderPlanSvg", () => {
       photos: [{ id: "ph", thumb: "data:image/jpeg;base64,AAAA", takenAt: 0 }],
       notes: "",
       source: "draw",
+      levelId: "level-main",
     });
     p.openings.push({ id: "o", roomId: "r1", kind: "door", wall: 0, offset: 3, width: 2.67 });
     const svg = renderPlanSvg(p);
