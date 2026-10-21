@@ -20,6 +20,15 @@ function PointerUnlock() {
   return null;
 }
 
+/** Register the offline service worker in production builds only. */
+function OfflineCache() {
+  useEffect(() => {
+    if (import.meta.env.DEV || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+  return null;
+}
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -29,7 +38,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f3efe4" },
       {
         name: "description",
-        content: "Turn photos and video of a space into a measured floor plan.",
+        content: "Turn a walkthrough into a measured floor plan.",
       },
     ],
     links: [
@@ -53,6 +62,7 @@ export const Route = createRootRoute({
       <body>
         <PreviewHostBridge />
         <PointerUnlock />
+        <OfflineCache />
         <AuthProvider>
           <Outlet />
           <Toaster
