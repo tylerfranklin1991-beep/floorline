@@ -4,6 +4,87 @@ import { toast } from "sonner";
 import { rotateStairs, stairsLabel, type FieldProperty, type FieldStairs } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
 import { LengthInput } from "./room-panel";
+import { jobSettings } from "@/lib/field/job";
+import { formatLinear, stairCarpetFor } from "@/lib/field/materials";
+
+const inch = (n: number) => {
+  const f = Math.floor(n / 12);
+  const i = Math.round((n - f * 12) * 4) / 4;
+  return f ? `${f}' ${i}"` : `${i}"`;
+};
+
+function StairCarpetSection({ property, stairs }: { property: FieldProperty; stairs: FieldStairs }) {
+  const updateStairs = useField((s) => s.updateStairs);
+  const j = jobSettings(property.job);
+  const style = stairs.style ?? j.stairStyle;
+  const cut = stairCarpetFor(stairs, property.units, j);
+  const on = stairs.carpet !== false;
+  const num = (label: string, v: number, key: "treadIn" | "riserIn") => (
+    <label className="flex items-center gap-1 text-sm">
+      {label}
+      <input
+        key={`${stairs.id}-${key}-${v}`}
+        aria-label={label}
+        type="number"
+        inputMode="decimal"
+        step={0.25}
+        min={0}
+        defaultValue={v}
+        onBlur={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n) && n >= 0 && n !== v) updateStairs(stairs.id, { [key]: n });
+        }}
+        className="h-11 w-20 rounded-xl border border-black/15 bg-white px-2 text-base"
+      />
+    </label>
+  );
+  return (
+    <section className="space-y-2" data-testid="stair-carpet">
+      <h3 className="text-base font-bold">3 · Stair carpet</h3>
+      <label className="flex min-h-12 items-center justify-between rounded-xl bg-black/[0.03] px-3 text-base">
+        Carpet these stairs
+        <input
+          type="checkbox"
+          className="size-6"
+          checked={on}
+          onChange={(e) => updateStairs(stairs.id, { carpet: e.target.checked })}
+        />
+      </label>
+      {on && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {(["box", "waterfall"] as const).map((x) => (
+              <button
+                key={x}
+                type="button"
+                aria-pressed={style === x}
+                onClick={() => updateStairs(stairs.id, { style: x })}
+                className={`h-12 rounded-xl text-base font-semibold ${style === x ? "bg-black text-white" : "bg-black/5"}`}
+              >
+                {x === "box" ? "Box / capped" : "Waterfall"}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {num("Tread in", stairs.treadIn ?? j.treadIn, "treadIn")}
+            {num("Riser in", stairs.riserIn ?? j.riserIn, "riserIn")}
+          </div>
+          {cut ? (
+            <div className="rounded-xl bg-black/[0.03] p-2 text-sm" data-testid="stair-cut">
+              <b>{cut.steps} cuts</b> of {inch(cut.pieceWidthIn)} × {inch(cut.pieceLengthIn)} (
+              {style === "box" ? "tread + riser + 3\" wrap" : "tread + riser + 2\" wrap"}).{" "}
+              {cut.perRow} per row across the {j.rollWidthFt}' roll → {cut.rows} row
+              {cut.rows === 1 ? "" : "s"} = <b>{formatLinear(cut.linear, property.units)}</b> off the
+              roll before waste.
+            </div>
+          ) : (
+            <p className="text-sm text-black/50">Type the step count above to get the cut list.</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
 /** Bottom panel for the selected stairs: direction, size, typed step count, link. */
 export function StairsPanel({
@@ -121,8 +202,10 @@ export function StairsPanel({
         </div>
       </section>
 
+      <StairCarpetSection property={property} stairs={stairs} />
+
       <section className="space-y-2">
-        <h3 className="text-base font-bold">3 · Leads to</h3>
+        <h3 className="text-base font-bold">4 · Leads to</h3>
         {others.length === 0 ? (
           <p className="text-base text-black/50">Add another level (top of the plan) to link it.</p>
         ) : (

@@ -1,5 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
@@ -18,6 +18,18 @@ function PointerUnlock() {
     return () => window.clearInterval(timer);
   }, []);
   return null;
+}
+
+/**
+ * Render the routed app only after mount. The SPA/APK shell is prerendered
+ * without the matched route, so hydrating the route straight away caused
+ * React error #418 (hydration mismatch). Both the shell and the first client
+ * render now emit nothing here, then the app renders client-side.
+ */
+function ClientOnly({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted ? <>{children}</> : null;
 }
 
 /** Register the offline service worker in production builds only. */
@@ -65,7 +77,9 @@ export const Route = createRootRoute({
         <PointerUnlock />
         <OfflineCache />
         <AuthProvider>
-          <Outlet />
+          <ClientOnly>
+            <Outlet />
+          </ClientOnly>
           <Toaster
             theme="light"
             position="bottom-center"

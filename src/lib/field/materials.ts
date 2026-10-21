@@ -18,6 +18,7 @@ import {
   type Pt,
   type Units,
 } from "./model.ts";
+import { jobSettings, type JobSettings } from "./job.ts";
 
 export type FloorMaterial = "carpet" | "hard" | "none";
 export type TransitionType = "t-mold" | "reducer" | "threshold" | "carpet-tile" | "none";
@@ -43,7 +44,20 @@ export interface RoomFlooring {
   /** Walls (edge indexes) that get no baseboard, e.g. behind cabinets. */
   noBaseWalls: number[];
   quarterRound: boolean;
+  /**
+   * Carpet: where the first seam falls, feet from the starting wall (0 = a full
+   * roll width against the wall). Slides every seam in the room.
+   */
+  seamOffsetFt: number;
+  /** LVP plank direction: 0 = planks run left-right, 90 = up-down. */
+  plankDeg: number;
 }
+
+export const MATERIAL_LABEL: Record<FloorMaterial, string> = {
+  carpet: "Carpet",
+  hard: "LVP",
+  none: "No floor",
+};
 
 export const DEFAULT_FLOORING: RoomFlooring = {
   material: "carpet",
@@ -53,11 +67,42 @@ export const DEFAULT_FLOORING: RoomFlooring = {
   wastePct: 5,
   noBaseWalls: [],
   quarterRound: false,
+  seamOffsetFt: 0,
+  plankDeg: 0,
 };
 
-export function roomFlooring(r: FieldRoom): RoomFlooring {
-  return { ...DEFAULT_FLOORING, ...(r.flooring ?? {}) };
+/**
+ * A room's flooring with job defaults filled in: roll width, trim and waste come
+ * from the job unless the room overrides them (waste follows the material:
+ * LVP waste vs carpet waste).
+ */
+export function roomFlooring(r: FieldRoom, job?: Partial<JobSettings>): RoomFlooring {
+  const j = jobSettings(job);
+  const saved = (r.flooring ?? {}) as Partial<RoomFlooring>;
+  const material = saved.material ?? DEFAULT_FLOORING.material;
+  const fin = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  return {
+    ...DEFAULT_FLOORING,
+    ...saved,
+    material,
+    rollWidthFt: fin(saved.rollWidthFt) && saved.rollWidthFt! > 0 ? saved.rollWidthFt! : j.rollWidthFt,
+    trimIn: fin(saved.trimIn) ? saved.trimIn! : j.trimIn,
+    wastePct: fin(saved.wastePct)
+      ? saved.wastePct!
+      : material === "carpet"
+        ? j.carpetWastePct
+        : material === "hard"
+          ? j.lvpWastePct
+          : 0,
+    seamOffsetFt: fin(saved.seamOffsetFt) ? saved.seamOffsetFt! : 0,
+    plankDeg: fin(saved.plankDeg) ? saved.plankDeg! : 0,
+    noBaseWalls: Array.isArray(saved.noBaseWalls) ? saved.noBaseWalls : [],
+  };
 }
+
+/** True when the room sets its own waste instead of using the job default. */
+export const wasteOverridden = (r: FieldRoom) =>
+  typeof r.flooring?.wastePct === "number" && Number.isFinite(r.flooring.wastePct);
 
 const FT = 0.3048;
 /** Feet expressed in the plan's units. */
@@ -67,7 +112,14 @@ export const toSqFt = (a: number, u: Units) => (u === "ft" ? a : a / (FT * FT));
 
 /* ------------------------------------------------------------------ area */
 
-export const roomArea = (r: FieldRoom) => area(r.points);
+/** Floor area: outline, minus exclusions (islands, cabinets, hearths), plus add-on areas. */
+export const roomArea = (r: FieldRoom) => {
+  let a = area(r.points);
+  for (const x of r.areas ?? []) a += (x.kind === "add" ? 1 : -1) * x.w * x.l;
+  return Math.max(0, a);
+};
+export const excludedArea = (r: FieldRoom) =>
+  (r.areas ?? []).filter((x) => x.kind === "exclude").reduce((s, x) => s + x.w * x.l, 0);
 
 /** Typical stair: 10" tread + 7.5" riser covered per step (carpet wraps both). */
 export function stairsArea(s: FieldStairs, u: Units): number {
@@ -201,6 +253,8 @@ export type Cut = {
   fill: boolean;
   /** Piece rectangle on the plan (without trim). */
   rect: { x: number; y: number; w: number; h: number };
+  /** Name of an add-on area this piece covers. */
+  label?: string;
 };
 export type Seam = { a: Pt; b: Pt };
 export type CarpetLayout = {
@@ -226,11 +280,14 @@ export function carpetLayout(room: FieldRoom, units: Units, f = roomFlooring(roo
   const maxY = Math.max(...pts.map((q) => q.y));
   const cuts: Cut[] = [];
   const seams: Seam[] = [];
-  const n = Math.max(1, Math.ceil((maxY - minY) / W - 1e-6));
-  for (let i = 0; i < n; i++) {
-    const y0 = minY + i * W;
+  // Seam offset: the first seam sits `off` from the starting wall (0 = full width).
+  const off = seamShift(f.seamOffsetFt, units, W);
+  let y0 = off > 1e-6 ? minY + off - W : minY;
+  let first = true;
+  while (y0 < maxY - 1e-6) {
+    const lo = Math.max(minY, y0);
     const y1 = Math.min(maxY, y0 + W);
-    for (const c of bandCoverage(pts, y0, y1)) {
+    for (const c of bandCoverage(pts, lo, y1)) {
       const width = c.yMax - c.yMin;
       const a = fromRollFrame({ x: c.iv[0], y: c.yMin }, f.pileDeg);
       const b = fromRollFrame({ x: c.iv[1], y: c.yMax }, f.pileDeg);
@@ -247,13 +304,34 @@ export function carpetLayout(room: FieldRoom, units: Units, f = roomFlooring(roo
         },
       });
     }
-    if (i > 0) {
-      const both = intersect(crossSection(pts, y0 - 1e-4), crossSection(pts, y0 + 1e-4));
+    if (!first) {
+      const both = intersect(crossSection(pts, lo - 1e-4), crossSection(pts, lo + 1e-4));
       for (const iv of union(both))
         seams.push({
-          a: fromRollFrame({ x: iv[0], y: y0 }, f.pileDeg),
-          b: fromRollFrame({ x: iv[1], y: y0 }, f.pileDeg),
+          a: fromRollFrame({ x: iv[0], y: lo }, f.pileDeg),
+          b: fromRollFrame({ x: iv[1], y: lo }, f.pileDeg),
         });
+    }
+    first = false;
+    y0 += W;
+  }
+  // Add-on areas (closet, bay) not drawn in the outline: their own pieces.
+  for (const x of room.areas ?? []) {
+    if (x.kind !== "add") continue;
+    const across = Math.min(x.w, x.l);
+    const along = Math.max(x.w, x.l);
+    let left = across;
+    while (left > 1e-6) {
+      const width = Math.min(W, left);
+      cuts.push({
+        roomId: room.id,
+        length: round2(along + 2 * trim),
+        width: round2(width),
+        fill: width < W - 1e-6,
+        rect: { x: 0, y: 0, w: 0, h: 0 },
+        label: x.name,
+      });
+      left -= width;
     }
   }
   return {
@@ -261,8 +339,27 @@ export function carpetLayout(room: FieldRoom, units: Units, f = roomFlooring(roo
     rollWidth: W,
     cuts,
     seams,
-    length: cuts.reduce((s, c) => s + c.length, 0),
+    length: round2(cuts.reduce((s, c) => s + c.length, 0)),
   };
+}
+
+/** Seam offset in plan units, wrapped into 0..W. */
+export function seamShift(offsetFt: number, units: Units, W: number): number {
+  const o = ftToUnits(offsetFt || 0, units);
+  return ((o % W) + W) % W;
+}
+
+/** Offsets (ft) for the seam presets: against the start wall, centred, against the far wall. */
+export function seamPresets(room: FieldRoom, f: RoomFlooring, units: Units) {
+  const pts = toRollFrame(room.points, f.pileDeg);
+  const span = Math.max(...pts.map((q) => q.y)) - Math.min(...pts.map((q) => q.y));
+  const W = ftToUnits(f.rollWidthFt, units);
+  const toFt = (n: number) => round2(units === "ft" ? n : n / FT);
+  const rem = span % W;
+  const n = Math.ceil(span / W - 1e-6);
+  // Centred: equal fills on both sides.
+  const centre = n <= 1 ? 0 : (W - (n * W - span) / 2) % W;
+  return { start: 0, centre: toFt(centre), far: toFt(rem < 1e-6 ? 0 : rem), spanFt: toFt(span) };
 }
 
 /** One length pulled off the roll; may carry several fills side by side. */
@@ -296,37 +393,165 @@ export function packRoll(cuts: Cut[], rollWidth: number, reuseFills: boolean): R
 export type CarpetOrder = {
   rollWidthFt: number;
   pieces: RollPiece[];
-  /** Linear length to order incl. waste, plan units (ft or m). */
+  /** Room carpet linear length incl. waste, plan units (ft or m). */
+  roomsLinear: number;
+  /** Stair carpet linear length incl. waste, plan units. */
+  stairsLinear: number;
+  /** Total linear length to order incl. waste, plan units (ft or m). */
   linear: number;
   /** Square yards (ft) or square metres (m) to order incl. waste. */
   yards: number;
 };
 
-/** Carpet to order, grouped by roll width. */
+/** Carpet to order, grouped by roll width. Waste follows each room's setting. */
 export function carpetOrder(p: FieldProperty): CarpetOrder[] {
-  const byWidth = new Map<number, { cuts: Cut[]; waste: number[] }>();
+  const job = jobSettings(p.job);
+  const byWidth = new Map<number, { cuts: Cut[]; stairs: number }>();
+  const wasteOf = new Map<string, number>();
   for (const r of p.rooms) {
-    const f = roomFlooring(r);
+    const f = roomFlooring(r, p.job);
     if (f.material !== "carpet") continue;
-    const g = byWidth.get(f.rollWidthFt) ?? { cuts: [], waste: [] };
-    const lay = carpetLayout(r, p.units, f);
-    g.cuts.push(...lay.cuts);
-    g.waste.push(...lay.cuts.map(() => f.wastePct));
+    const g = byWidth.get(f.rollWidthFt) ?? { cuts: [], stairs: 0 };
+    g.cuts.push(...carpetLayout(r, p.units, f).cuts);
+    wasteOf.set(r.id, f.wastePct);
     byWidth.set(f.rollWidthFt, g);
+  }
+  const st = stairCarpet(p);
+  if (st.length) {
+    const g = byWidth.get(job.rollWidthFt) ?? { cuts: [], stairs: 0 };
+    g.stairs += st.reduce((s, x) => s + x.linear, 0);
+    byWidth.set(job.rollWidthFt, g);
   }
   return [...byWidth.entries()].map(([wFt, g]) => {
     const W = ftToUnits(wFt, p.units);
     const pieces = packRoll(g.cuts, W, p.reuseFills ?? false);
-    const waste = g.waste.length ? Math.max(...g.waste) : 0;
-    const linear = round2(pieces.reduce((s, x) => s + x.length, 0) * (1 + waste / 100));
+    const roomsLinear = round2(
+      pieces.reduce(
+        (s, x) => s + x.length * (1 + Math.max(...x.cuts.map((c) => wasteOf.get(c.roomId) ?? 0)) / 100),
+        0,
+      ),
+    );
+    const stairsLinear = round2(g.stairs * (1 + job.carpetWastePct / 100));
+    const linear = round2(roomsLinear + stairsLinear);
     const sq = linear * W;
     return {
       rollWidthFt: wFt,
       pieces,
+      roomsLinear,
+      stairsLinear,
       linear,
       yards: round2(p.units === "ft" ? sq / 9 : sq),
     };
   });
+}
+
+/* ------------------------------------------------------------ stair carpet */
+
+export type StairCut = {
+  stairsId: string;
+  levelId: string;
+  steps: number;
+  style: "box" | "waterfall";
+  /** Per-step piece, inches: across the stair × along the roll (tread + riser + wrap). */
+  pieceWidthIn: number;
+  pieceLengthIn: number;
+  /** Steps that fit side by side across the roll. */
+  perRow: number;
+  rows: number;
+  /** Length off the roll before waste, plan units. */
+  linear: number;
+  /** Carpet area of the steps, sq ft. */
+  sqft: number;
+};
+
+/** Wrap allowance per step (inches): box / capped ≈ 3", waterfall ≈ 2". */
+export const STAIR_WRAP_IN = { box: 3, waterfall: 2 } as const;
+
+/**
+ * Per-step stair carpet cuts. Pile runs down the stairs, so each step piece is
+ * the stair width across the roll and tread + riser + wrap along it; as many
+ * steps as fit sit side by side across the roll width.
+ */
+export function stairCarpetFor(s: FieldStairs, units: Units, job: JobSettings): StairCut | null {
+  if (s.carpet === false || !s.steps) return null;
+  const style = s.style ?? job.stairStyle;
+  const tread = s.treadIn ?? job.treadIn;
+  const riser = s.riserIn ?? job.riserIn;
+  const widthIn = round2((units === "ft" ? s.width : s.width / FT) * 12);
+  const pieceLengthIn = round2(tread + riser + STAIR_WRAP_IN[style]);
+  const rollIn = job.rollWidthFt * 12;
+  const perRow = Math.max(1, Math.floor((rollIn + 1e-6) / Math.max(1, widthIn)));
+  const rows = Math.ceil(s.steps / perRow);
+  const linearFt = (rows * pieceLengthIn) / 12;
+  return {
+    stairsId: s.id,
+    levelId: s.levelId,
+    steps: s.steps,
+    style,
+    pieceWidthIn: widthIn,
+    pieceLengthIn,
+    perRow,
+    rows,
+    linear: round2(ftToUnits(linearFt, units)),
+    sqft: round2((s.steps * widthIn * pieceLengthIn) / 144),
+  };
+}
+export function stairCarpet(p: FieldProperty): StairCut[] {
+  const job = jobSettings(p.job);
+  return p.stairs
+    .map((s) => stairCarpetFor(s, p.units, job))
+    .filter((x): x is StairCut => Boolean(x));
+}
+
+/* --------------------------------------------------------------- LVP, pad */
+
+export type LvpOrder = {
+  /** Net floor sq ft (after exclusions). */
+  sqft: number;
+  /** Sq ft including each room's waste. */
+  withWaste: number;
+  /** Boxes rounded up, or null when box coverage isn't set. */
+  boxes: number | null;
+  boxSqFt: number;
+};
+
+/** Whole boxes for an area (with waste already applied). */
+export function boxesFor(sqftWithWaste: number, boxSqFt: number): number | null {
+  if (!(boxSqFt > 0)) return null;
+  return Math.ceil(sqftWithWaste / boxSqFt - 1e-9);
+}
+
+export function lvpOrder(p: FieldProperty): LvpOrder {
+  const job = jobSettings(p.job);
+  let sqft = 0;
+  let withWaste = 0;
+  for (const r of p.rooms) {
+    const f = roomFlooring(r, p.job);
+    if (f.material !== "hard") continue;
+    const a = toSqFt(roomArea(r), p.units);
+    sqft += a;
+    withWaste += a * (1 + f.wastePct / 100);
+  }
+  return {
+    sqft: round2(sqft),
+    withWaste: round2(withWaste),
+    boxes: sqft > 0 ? boxesFor(withWaste, job.lvpBoxSqFt) : 0,
+    boxSqFt: job.lvpBoxSqFt,
+  };
+}
+
+/** Pad under carpet: carpet rooms (net) + carpeted stairs, plus pad waste, in SY. */
+export function padOrder(p: FieldProperty): { sqft: number; sy: number } {
+  const job = jobSettings(p.job);
+  if (!job.pad) return { sqft: 0, sy: 0 };
+  let sqft = 0;
+  for (const r of p.rooms)
+    if (roomFlooring(r, p.job).material === "carpet") sqft += toSqFt(roomArea(r), p.units);
+  sqft += stairCarpet(p).reduce((s, x) => s + x.sqft, 0);
+  return {
+    sqft: round2(sqft),
+    sy: sqft > 0 ? Math.ceil(((sqft / 9) * (1 + job.padWastePct / 100)) * 10 - 1e-9) / 10 : 0,
+  };
 }
 
 /* ------------------------------------------------------ baseboard / trim */
@@ -335,7 +560,7 @@ const isPassage = (o: FieldOpening) => o.kind !== "window";
 
 /** Baseboard run for a room: perimeter minus excluded walls minus doorway widths. */
 export function baseboard(p: FieldProperty, room: FieldRoom): number {
-  const f = roomFlooring(room);
+  const f = roomFlooring(room, p.job);
   const skip = new Set(f.noBaseWalls);
   let total = 0;
   for (const e of edges(room.points)) if (!skip.has(e.index)) total += e.length;
@@ -398,8 +623,8 @@ export function transitions(p: FieldProperty): Transition[] {
     if (twin) used.add(twin.o.id);
     const chosen = s.o.transition ?? twin?.o.transition;
     const auto = defaultTransition(
-      roomFlooring(s.room).material,
-      twin ? roomFlooring(twin.room).material : null,
+      roomFlooring(s.room, p.job).material,
+      twin ? roomFlooring(twin.room, p.job).material : null,
     );
     out.push({
       openingId: s.o.id,
@@ -432,6 +657,9 @@ export type Materials = {
   quarterRound: number;
   transitions: Transition[];
   transitionTotals: { type: TransitionType; count: number; length: number }[];
+  lvp: LvpOrder;
+  pad: { sqft: number; sy: number };
+  stairs: StairCut[];
 };
 
 export function materials(full: FieldProperty, levelId?: string): Materials {
@@ -439,7 +667,7 @@ export function materials(full: FieldProperty, levelId?: string): Materials {
     ? { ...levelView(full, levelId), levels: full.levels.filter((l) => l.id === levelId) }
     : full;
   const rooms = p.rooms.map((room) => {
-    const f = roomFlooring(room);
+    const f = roomFlooring(room, p.job);
     const bb = f.material === "none" ? 0 : baseboard(p, room);
     return {
       room,
@@ -467,6 +695,9 @@ export function materials(full: FieldProperty, levelId?: string): Materials {
     quarterRound: round2(rooms.reduce((s, r) => s + r.quarterRound, 0)),
     transitions: tr,
     transitionTotals: [...totals.entries()].map(([type, g]) => ({ type, ...g })),
+    lvp: lvpOrder(p),
+    pad: padOrder(p),
+    stairs: stairCarpet(p),
   };
 }
 

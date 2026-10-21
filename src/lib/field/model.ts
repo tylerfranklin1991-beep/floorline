@@ -7,6 +7,8 @@
  * either horizontal or vertical, which is what keeps layouts clean.
  */
 
+import type { JobSettings } from "./job.ts";
+
 export type Units = "ft" | "m";
 export type Pt = { x: number; y: number };
 import type { RoomFlooring, TransitionType } from "./materials.ts";
@@ -33,6 +35,18 @@ export interface FieldRoom {
   levelId: string;
   /** Flooring, carpet layout and trim settings (defaults apply when missing). */
   flooring?: Partial<RoomFlooring>;
+  /** Islands, cabinets, hearths (subtract) or bump-outs / closets (add), as simple w × l areas. */
+  areas?: RoomArea[];
+}
+
+export interface RoomArea {
+  id: string;
+  name: string;
+  /** Plan units. */
+  w: number;
+  l: number;
+  /** "exclude" removes floor (island, cabinets, hearth); "add" adds floor (closet, bay). */
+  kind: "exclude" | "add";
 }
 
 export interface FieldLevel {
@@ -59,6 +73,12 @@ export interface FieldStairs {
   steps: number | null;
   /** Level the stairs lead to, if linked. */
   toLevelId: string | null;
+  /** Stair carpet: box (capped/upholstered) or waterfall. Defaults from the job. */
+  style?: "box" | "waterfall";
+  treadIn?: number;
+  riserIn?: number;
+  /** Carpet these stairs (default true). */
+  carpet?: boolean;
 }
 
 export interface FieldOpening {
@@ -90,6 +110,8 @@ export interface FieldProperty {
   reuseFills?: boolean;
   /** Show carpet seams on the plan and in exports (default on). */
   showSeams?: boolean;
+  /** Per-job settings and customer info (see job.ts). */
+  job?: Partial<JobSettings>;
   createdAt: number;
   updatedAt: number;
 }
@@ -101,9 +123,11 @@ export const ROOM_PRESETS = [
   "Kitchen",
   "Dining",
   "Bedroom",
+  "Primary bed",
   "Bath",
   "Hall",
   "Closet",
+  "WIC",
   "Laundry",
   "Office",
   "Garage",
@@ -313,6 +337,10 @@ export function sanitizeStairs(v: unknown, levelIds: Set<string>, fallback: stri
     direction: s.direction === "down" ? "down" : "up",
     steps: Number.isInteger(steps) && steps > 0 && steps < 100 ? steps : null,
     toLevelId: typeof s.toLevelId === "string" && levelIds.has(s.toLevelId) ? s.toLevelId : null,
+    ...(s.style === "box" || s.style === "waterfall" ? { style: s.style } : {}),
+    ...(Number(s.treadIn) > 0 ? { treadIn: Number(s.treadIn) } : {}),
+    ...(Number(s.riserIn) >= 0 && s.riserIn != null ? { riserIn: Number(s.riserIn) } : {}),
+    ...(s.carpet === false ? { carpet: false as boolean } : {}),
   } satisfies FieldStairs;
 }
 
@@ -373,6 +401,33 @@ export function pointInPolygon(p: Pt, points: Pt[]): boolean {
 }
 
 /** Clockwise in screen coordinates (y down) means positive signed area here. */
+/**
+ * L-shaped room: overall w × h with a cw × ch notch cut out of one corner
+ * ("tr" top-right, "tl", "br", "bl"). Returns null when the notch doesn't fit.
+ */
+export function lShapePoints(
+  w: number,
+  h: number,
+  cw: number,
+  ch: number,
+  corner: "tr" | "tl" | "br" | "bl" = "tr",
+): Pt[] | null {
+  if (!(w > 0 && h > 0 && cw > 0 && ch > 0) || cw >= w - 1e-6 || ch >= h - 1e-6) return null;
+  // Build with the notch top-right, then mirror.
+  const base: Pt[] = [
+    { x: 0, y: 0 },
+    { x: w - cw, y: 0 },
+    { x: w - cw, y: ch },
+    { x: w, y: ch },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ];
+  const mx = corner === "tl" || corner === "bl";
+  const my = corner === "br" || corner === "bl";
+  const pts = base.map((q) => ({ x: mx ? w - q.x : q.x, y: my ? h - q.y : q.y }));
+  return ensureClockwise(pts);
+}
+
 export function ensureClockwise(points: Pt[]): Pt[] {
   let sum = 0;
   for (let i = 0; i < points.length; i += 1) {
@@ -753,7 +808,11 @@ export function convertProperty(p: FieldProperty, units: Units): FieldProperty {
   return {
     ...p,
     units,
-    rooms: p.rooms.map((r) => ({ ...r, points: r.points.map((q) => ({ x: c(q.x), y: c(q.y) })) })),
+    rooms: p.rooms.map((r) => ({
+      ...r,
+      points: r.points.map((q) => ({ x: c(q.x), y: c(q.y) })),
+      ...(r.areas ? { areas: r.areas.map((a) => ({ ...a, w: c(a.w), l: c(a.l) })) } : {}),
+    })),
     openings: p.openings.map((o) => ({ ...o, offset: c(o.offset), width: c(o.width) })),
     stairs: p.stairs.map((s) => ({
       ...s,
@@ -795,6 +854,22 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
       source: r.source ?? "draw",
       levelId: typeof r.levelId === "string" && levelIds.has(r.levelId) ? r.levelId : fallback,
       ...(r.flooring && typeof r.flooring === "object" ? { flooring: r.flooring } : {}),
+      ...(Array.isArray(r.areas)
+        ? {
+            areas: r.areas
+              .filter(
+                (a) =>
+                  a && typeof a.id === "string" && Number(a.w) > 0 && Number(a.l) > 0,
+              )
+              .map((a) => ({
+                id: a.id,
+                name: typeof a.name === "string" ? a.name : "Area",
+                w: Number(a.w),
+                l: Number(a.l),
+                kind: a.kind === "add" ? ("add" as const) : ("exclude" as const),
+              })),
+          }
+        : {}),
     });
   }
   const ids = new Set(rooms.map((r) => r.id));
@@ -814,6 +889,7 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     includeStairs: v.includeStairs === true,
     reuseFills: v.reuseFills === true,
     showSeams: v.showSeams !== false,
+    ...(v.job && typeof v.job === "object" ? { job: { ...v.job } } : {}),
     createdAt: Number(v.createdAt) || Date.now(),
     updatedAt: Number(v.updatedAt) || Date.now(),
   };

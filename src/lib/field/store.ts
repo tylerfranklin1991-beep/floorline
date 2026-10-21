@@ -12,7 +12,10 @@ import {
   type FieldProperty,
   type FieldRoom,
   type Units,
+  translate,
+  bbox,
 } from "./model";
+import { jobSettings, loadLastSettings, saveLastSettings, type JobSettings } from "./job";
 
 type FieldState = {
   properties: FieldProperty[];
@@ -40,6 +43,10 @@ type FieldState = {
   addRoom: (room: FieldRoom) => void;
   updateRoom: (id: string, patch: Partial<FieldRoom>) => void;
   deleteRoom: (id: string) => void;
+  /** Copy a room (shape, flooring, areas, notes; not photos/doors) next to the original. */
+  duplicateRoom: (id: string) => string | null;
+  /** Update the open job's settings and remember them for the next job. */
+  updateJob: (patch: Partial<JobSettings>) => void;
   addOpening: (opening: FieldOpening) => void;
   updateOpening: (id: string, patch: Partial<FieldOpening>) => void;
   deleteOpening: (id: string) => void;
@@ -66,7 +73,17 @@ export function setOnSaveError(fn: (err: unknown) => void) {
 export const safeStorage = {
   getItem: (k: string) => {
     try {
-      return globalThis.localStorage?.getItem(k) ?? null;
+      const v = globalThis.localStorage?.getItem(k) ?? null;
+      if (v != null) {
+        try {
+          JSON.parse(v);
+        } catch {
+          // Never let a damaged save be overwritten by an empty list: keep a copy.
+          globalThis.localStorage?.setItem(`${k}-corrupt-${Date.now()}`, v);
+          return null;
+        }
+      }
+      return v;
     } catch {
       return null;
     }
@@ -131,7 +148,7 @@ export const useField = create<FieldState>()(
         selectedStairsId: null,
         currentLevelId: null,
         createProperty: (name, units) => {
-          const p = newProperty(name, units);
+          const p = { ...newProperty(name, units), job: jobSettings(loadLastSettings()) };
           set({
             properties: [p, ...get().properties],
             currentId: p.id,
@@ -241,6 +258,12 @@ export const useField = create<FieldState>()(
             ? get().currentLevelId!
             : (p0?.levels[0]?.id ?? room.levelId);
           room = { ...room, levelId };
+          // New rooms get the job's default material (LVP unless changed).
+          if (!room.flooring?.material && p0)
+            room = {
+              ...room,
+              flooring: { ...(room.flooring ?? {}), material: jobSettings(p0.job).defaultMaterial },
+            };
           get().change((p) => ({ ...p, rooms: [...p.rooms, room] }));
           set({ selectedRoomId: room.id, selectedOpeningId: null });
         },
@@ -256,6 +279,33 @@ export const useField = create<FieldState>()(
             openings: p.openings.filter((o) => o.roomId !== id),
           }));
           set({ selectedRoomId: null, selectedOpeningId: null });
+        },
+        duplicateRoom: (id) => {
+          const p0 = current();
+          const r = p0?.rooms.find((x) => x.id === id);
+          if (!p0 || !r) return null;
+          const b = bbox(r.points);
+          const others = p0.rooms.filter((x) => x.levelId === r.levelId).flatMap((x) => x.points);
+          const right = bbox(others).maxX;
+          const gap = p0.units === "ft" ? 2 : 0.6;
+          const copy: FieldRoom = {
+            ...structuredClone(r),
+            id: uid("room"),
+            name: `${r.name} copy`,
+            photos: [],
+            points: translate(r.points, right + gap - b.minX, 0),
+            areas: r.areas?.map((a) => ({ ...a, id: uid("area") })),
+          };
+          get().change((p) => ({ ...p, rooms: [...p.rooms, copy] }));
+          set({ selectedRoomId: copy.id, selectedOpeningId: null });
+          return copy.id;
+        },
+        updateJob: (patch) => {
+          const p0 = current();
+          if (!p0) return;
+          const job = { ...jobSettings(p0.job), ...patch };
+          get().change((p) => ({ ...p, job }));
+          saveLastSettings(job);
         },
         addOpening: (opening) => {
           get().change((p) => ({ ...p, openings: [...p.openings, opening] }));
