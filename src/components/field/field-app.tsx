@@ -21,6 +21,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { isArSupported } from "@/lib/field/ar";
+import { hasNativeArScan } from "@/lib/field/arcore";
 import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
   area,
@@ -50,6 +51,7 @@ import {
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
 import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
+import { ArCoreScan } from "./arcore-scan";
 import { MaterialsScreen } from "./materials-screen";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
@@ -206,7 +208,7 @@ function HomeScreen() {
 
 /* ------------------------------------------------------------ property */
 
-type Capture = null | { kind: "ar" | "walk" | "walkmode"; name: string };
+type Capture = null | { kind: "ar" | "walk" | "walkmode" | "arcore"; name: string };
 
 function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const storedLevelId = useField((s) => s.currentLevelId);
@@ -279,7 +281,11 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   };
 
   /** Commit a whole walk-mode session as one undo step, on the current level. */
-  const placeWalk = async (walked: WalkRoom[], doorWidth: number) => {
+  const placeWalk = async (
+    walked: WalkRoom[],
+    doorWidth: number,
+    source: FieldRoom["source"] = "walk",
+  ) => {
     const all = walked.flatMap((r) => r.points);
     const box = bbox(all);
     const origin = nextRoomOrigin(property.rooms);
@@ -289,7 +295,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     const rooms: FieldRoom[] = [];
     const openings: FieldOpening[] = [];
     for (const w of walked) {
-      const r = { ...newRoom(w.name, translate(w.points, dx, dy), "walk"), levelId };
+      const r = { ...newRoom(w.name, translate(w.points, dx, dy), source), levelId };
       for (const p of (w.photos ?? []).slice(0, MAX_PHOTOS_PER_ROOM)) {
         const id = uid("photo");
         await savePhotoBlob(id, p.full).catch(() => {});
@@ -324,7 +330,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const step = property.rooms.length === 0 ? 1 : !room ? 2 : 3;
 
   return (
-    <div className="flex h-dvh flex-col bg-[#f6f2e8]">
+    <div className="ar-scan-host flex h-dvh flex-col bg-[#f6f2e8]">
       <header
         className="flex items-center gap-1 border-b border-black/10 bg-white px-2 py-2"
         style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
@@ -471,7 +477,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               setDrawName(name);
             } else if (how === "typed" && size) {
               void placeRoom(name, size.points ?? rectPoints(0, 0, size.w, size.h), "typed");
-            } else if (how === "ar" || how === "walk" || how === "walkmode") {
+            } else if (how === "ar" || how === "walk" || how === "walkmode" || how === "arcore") {
               setCapture({ kind: how, name });
             }
           }}
@@ -503,6 +509,22 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             const name = capture.name;
             setCapture(null);
             void placeRoom(name, pts, "walk", photos);
+          }}
+        />
+      )}
+
+      {capture?.kind === "arcore" && (
+        <ArCoreScan
+          units={property.units}
+          firstName={capture.name}
+          roomCount={property.rooms.length}
+          onCancel={(reason) => {
+            setCapture(null);
+            if (reason) toast.error(reason);
+          }}
+          onDone={(scanned, doorWidth) => {
+            setCapture(null);
+            void placeWalk(scanned, doorWidth, "ar");
           }}
         />
       )}
@@ -684,7 +706,7 @@ function AddRoomSheet({
   defaultName: string;
   onClose: () => void;
   onPick: (
-    how: "ar" | "walk" | "walkmode" | "draw" | "typed",
+    how: "ar" | "walk" | "walkmode" | "arcore" | "draw" | "typed",
     name: string,
     size?: { w: number; h: number; points?: Pt[] },
   ) => void;
@@ -726,6 +748,14 @@ function AddRoomSheet({
         <QuickSize units={units} name={n} onPick={onPick} />
         <div className="space-y-2">
           <div className="text-base font-semibold">Or capture / draw the shape</div>
+          {hasNativeArScan() && (
+            <MethodBtn
+              icon={<ScanLine />}
+              title="ARCore scan (room to room)"
+              body="Beta 2: walk through the house with the camera on. Walls and floor are detected automatically; tap New room at each door."
+              onClick={() => onPick("arcore", n)}
+            />
+          )}
           <MethodBtn
             icon={<ScanLine />}
             title="AR corners"

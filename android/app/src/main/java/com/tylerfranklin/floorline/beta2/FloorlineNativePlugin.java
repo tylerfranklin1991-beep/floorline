@@ -1,4 +1,4 @@
-package com.tylerfranklin.floorline.beta;
+package com.tylerfranklin.floorline.beta2;
 
 import android.Manifest;
 import android.content.Intent;

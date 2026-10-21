@@ -9,6 +9,9 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!-- Floorline Beta 2 needs ARCore (Google Play Services for AR). -->
+        <meta-data android:name="com.google.ar.core" android:value="required" />
+
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
             android:name=".MainActivity"
@@ -41,7 +44,10 @@
     <!-- Camera walk (getUserMedia) and photo capture. Capacitor's WebChromeClient
          asks for this at runtime when the page requests the camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <!-- AR Required app: only installs/listed on ARCore-supported devices. -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <uses-feature android:glEsVersion="0x00020000" android:required="true" />
     <!-- Walk mode reads the accelerometer + compass through the WebView's
          DeviceMotion/DeviceOrientation events: no runtime permission needed
          (we don't use the hardware step counter, so no ACTIVITY_RECOGNITION).
