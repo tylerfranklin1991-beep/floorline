@@ -18,12 +18,17 @@ export function PhotoSlots({
 
   const onFile = async (file: File | undefined) => {
     if (!file) return;
+    const before = useField.getState().history?.present.rooms.find((r) => r.id === room.id);
+    if (!before || before.photos.length >= MAX_PHOTOS_PER_ROOM) return;
     try {
       const prepared = await prepareFromFile(file);
       const id = uid("photo");
       await savePhotoBlob(id, prepared.full).catch(() => {});
       const current = useField.getState().history?.present.rooms.find((r) => r.id === room.id);
-      if (!current) return;
+      if (!current || current.photos.length >= MAX_PHOTOS_PER_ROOM) {
+        void deletePhotoBlob(id).catch(() => {});
+        return;
+      }
       updateRoom(room.id, {
         photos: [...current.photos, { id, thumb: prepared.thumb, takenAt: Date.now() }].slice(
           0,

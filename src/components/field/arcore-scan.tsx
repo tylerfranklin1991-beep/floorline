@@ -42,11 +42,15 @@ export function ArCoreScan({
           scanner.current.push(f);
           setTick((t) => t + 1);
         });
+        if (!alive) return void handle.remove();
         const r = await ArScan.start();
-        if (!alive) return;
+        // Closed while the permission/install prompt was up: don't leave a
+        // headless AR session holding the camera behind a transparent page.
+        if (!alive) return void ArScan.stop().catch(() => {});
         setDepth(r.depth);
         setStatus("Scanning");
       } catch (e) {
+        if (!alive) return;
         setError(e instanceof Error ? e.message : String(e));
       }
     })();

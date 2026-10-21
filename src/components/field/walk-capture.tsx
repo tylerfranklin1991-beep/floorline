@@ -1,6 +1,6 @@
 import { Camera, CornerUpLeft, CornerUpRight, Undo2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { describeCameraError, openRearCamera, stopStream } from "@/lib/field/camera";
+import { useRef, useState } from "react";
+import { useCamera } from "@/lib/field/use-camera";
 import {
   formatLength,
   MAX_PHOTOS_PER_ROOM,
@@ -29,33 +29,13 @@ export function WalkCapture({
   onCancel: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const [camError, setCamError] = useState<string | null>(null);
-  const [camReady, setCamReady] = useState(false);
+  const cam = useCamera(video, true);
+  const camReady = cam.status === "live";
   const [steps, setSteps] = useState<WalkStep[]>([]);
   const [lengthText, setLengthText] = useState("");
   const [photos, setPhotos] = useState<PreparedPhoto[]>([]);
   const [typedAny, setTypedAny] = useState(false);
   const defaultLen = units === "ft" ? 10 : 3;
-
-  useEffect(() => {
-    let cancelled = false;
-    openRearCamera()
-      .then(async (s) => {
-        if (cancelled) return stopStream(s);
-        stream.current = s;
-        if (video.current) {
-          video.current.srcObject = s;
-          await video.current.play().catch(() => {});
-          setCamReady(true);
-        }
-      })
-      .catch((err) => !cancelled && setCamError(describeCameraError(err).message));
-    return () => {
-      cancelled = true;
-      stopStream(stream.current);
-    };
-  }, []);
 
   const typed = parseLength(lengthText, units);
   const addWall = (turn: "left" | "right") => {
@@ -92,7 +72,7 @@ export function WalkCapture({
   })();
 
   const finish = () => {
-    stopStream(stream.current);
+    cam.stop();
     onDone(outlineFromWalk(steps, units === "ft" ? 0.5 : 0.1), photos, typedAny);
   };
 
@@ -106,8 +86,24 @@ export function WalkCapture({
         className="absolute inset-0 h-full w-full object-cover"
       />
       {!camReady && (
-        <div className="absolute inset-0 flex items-center justify-center p-8 text-center text-lg text-white/80">
-          {camError ?? "Starting camera… allow camera access if asked."}
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-8 text-center text-lg text-white/80">
+          <p>
+            {cam.status === "error"
+              ? cam.error
+              : cam.status === "starting"
+                ? "Starting camera… allow camera access if asked."
+                : "Camera is off."}
+          </p>
+          {cam.status !== "starting" && (
+            <button
+              type="button"
+              onClick={() => void cam.start()}
+              className="h-14 rounded-xl bg-[#b4561d] px-6 text-lg font-bold text-white"
+            >
+              Tap to start camera
+            </button>
+          )}
+          <p className="text-sm text-white/60">You can still tap the turns without the camera.</p>
         </div>
       )}
       <div

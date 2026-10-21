@@ -141,7 +141,7 @@ class ArScanPlugin : Plugin() {
         renderer = null
         session?.let {
             try { it.pause() } catch (_: Exception) {}
-            it.close()
+            try { it.close() } catch (_: Exception) {}
         }
         session = null
         bridge?.webView?.setBackgroundColor(Color.WHITE)
@@ -149,8 +149,9 @@ class ArScanPlugin : Plugin() {
 
     override fun handleOnPause() {
         super.handleOnPause()
+        // GL thread first (onPause blocks until it stops calling session.update()).
         glView?.onPause()
-        session?.pause()
+        try { session?.pause() } catch (_: Exception) {}
     }
 
     override fun handleOnResume() {
@@ -158,8 +159,17 @@ class ArScanPlugin : Plugin() {
         val s = session ?: return
         try {
             s.resume()
-            glView?.onResume()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // e.g. CameraNotAvailableException when another app grabbed the camera:
+            // tell JS instead of silently showing a frozen/black background.
+            val err = JSObject()
+            err.put("tracking", "STOPPED")
+            err.put("failure", "CAMERA_UNAVAILABLE")
+            err.put("planes", JSArray())
+            emit(err)
+        }
+        // Always restart the GL view, otherwise a failed resume left it paused forever.
+        glView?.onResume()
     }
 
     override fun handleOnDestroy() {

@@ -43,9 +43,10 @@ import {
   type FieldRoom,
   type Pt,
   type Units,
+  MAX_PHOTOS_PER_ROOM,
 } from "@/lib/field/model";
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
-import { useCurrentProperty, useField } from "@/lib/field/store";
+import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
 import { ArCoreScan } from "./arcore-scan";
 import { PlanEditor, type EditorMode } from "./plan-editor";
@@ -53,6 +54,15 @@ import { RoomPanel } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
+
+let lastSaveToast = 0;
+setOnSaveError(() => {
+  if (Date.now() - lastSaveToast < 15_000) return;
+  lastSaveToast = Date.now();
+  toast.error(
+    "Phone storage is full — your latest change may not be saved. Remove some photos or export a backup.",
+  );
+});
 
 export function FieldApp() {
   const property = useCurrentProperty();
@@ -259,7 +269,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   };
 
   /** Commit a whole walk-mode session as one undo step, on the current level. */
-  const placeWalk = (
+  const placeWalk = async (
     walked: WalkRoom[],
     doorWidth: number,
     source: FieldRoom["source"] = "walk",
@@ -274,6 +284,11 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     const openings: FieldOpening[] = [];
     for (const w of walked) {
       const r = { ...newRoom(w.name, translate(w.points, dx, dy), source), levelId };
+      for (const p of (w.photos ?? []).slice(0, MAX_PHOTOS_PER_ROOM)) {
+        const id = uid("photo");
+        await savePhotoBlob(id, p.full).catch(() => {});
+        r.photos.push({ id, thumb: p.thumb, takenAt: Date.now() });
+      }
       rooms.push(r);
       if (w.door) {
         const at = { x: w.door.at.x + dx, y: w.door.at.y + dy };
@@ -490,7 +505,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           }}
           onDone={(scanned, doorWidth) => {
             setCapture(null);
-            placeWalk(scanned, doorWidth, "ar");
+            void placeWalk(scanned, doorWidth, "ar");
           }}
         />
       )}
@@ -503,7 +518,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           onCancel={() => setCapture(null)}
           onDone={(walked, doorWidth) => {
             setCapture(null);
-            placeWalk(walked, doorWidth);
+            void placeWalk(walked, doorWidth);
           }}
         />
       )}

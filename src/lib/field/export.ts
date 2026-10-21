@@ -1,4 +1,5 @@
 import { area, formatArea, type FieldProperty } from "./model";
+import { isNativeApp, nativeShareFile } from "./native";
 import { renderLevelSvgs } from "./render";
 
 export function slug(s: string) {
@@ -11,6 +12,10 @@ export function slug(s: string) {
 }
 
 export function downloadBlob(filename: string, blob: Blob) {
+  if (isNativeApp()) {
+    // Android WebView ignores <a download> on blob: URLs, so exports did nothing.
+    return nativeShareFile(filename, blob);
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -19,6 +24,7 @@ export function downloadBlob(filename: string, blob: Blob) {
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return Promise.resolve();
 }
 
 /** One PNG with every level stacked top to bottom. */
@@ -61,11 +67,11 @@ export async function planPngBlob(p: FieldProperty): Promise<Blob> {
 }
 
 export async function exportPng(p: FieldProperty) {
-  downloadBlob(`${slug(p.name)}.png`, await planPngBlob(p));
+  await downloadBlob(`${slug(p.name)}.png`, await planPngBlob(p));
 }
 
 export function exportJson(p: FieldProperty) {
-  downloadBlob(
+  return downloadBlob(
     `${slug(p.name)}.floorline.json`,
     new Blob([JSON.stringify(p, null, 2)], { type: "application/json" }),
   );
@@ -76,12 +82,12 @@ export async function sharePng(p: FieldProperty): Promise<boolean> {
   const blob = await planPngBlob(p);
   const file = new File([blob], `${slug(p.name)}.png`, { type: "image/png" });
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-  if (nav.share && nav.canShare?.({ files: [file] })) {
+  if (!isNativeApp() && nav.share && nav.canShare?.({ files: [file] })) {
     await nav.share({ files: [file], title: p.name });
     return true;
   }
-  downloadBlob(file.name, blob);
-  return false;
+  await downloadBlob(file.name, blob);
+  return isNativeApp();
 }
 
 /** Printable page (plan + room photo list). Use the print dialog's "Save as PDF". */
@@ -108,14 +114,16 @@ h3{margin:4px 0} small{color:#666;font-weight:400}
 </style></head><body><button onclick="print()" style="font-size:20px;padding:12px 20px">Save as PDF / Print</button>
 <div class="plan">${svg}</div><div class="rooms">${rows}</div>
 <script>setTimeout(()=>print(),400)</script></body></html>`;
-  const w = window.open("", "_blank");
+  // The app's WebView has no second window to print from: share the page instead
+  // (open it in Chrome and use Print → Save as PDF).
+  const w = isNativeApp() ? null : window.open("", "_blank");
   if (!w) {
-    downloadBlob(`${slug(p.name)}.html`, new Blob([html], { type: "text/html" }));
-    return;
+    return downloadBlob(`${slug(p.name)}.html`, new Blob([html], { type: "text/html" }));
   }
   w.document.open();
   w.document.write(html);
   w.document.close();
+  return Promise.resolve();
 }
 
 function escapeHtml(s: string) {

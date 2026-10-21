@@ -1,0 +1,81 @@
+package com.tylerfranklin.floorline.beta2;
+
+import android.Manifest;
+import android.content.Intent;
+import android.net.Uri;
+import android.util.Base64;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.io.FileOutputStream;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+
+/**
+ * Asks for the Android CAMERA runtime permission before the page calls
+ * getUserMedia, so the WebView's own permission request is granted straight
+ * away instead of racing a system dialog (which pauses the activity).
+ */
+@CapacitorPlugin(name = "FloorlineNative", permissions = { @Permission(strings = { Manifest.permission.CAMERA }, alias = "camera") })
+public class FloorlineNativePlugin extends Plugin {
+
+    @PluginMethod
+    public void ensure(PluginCall call) {
+        if (getPermissionState("camera") == PermissionState.GRANTED) {
+            resolve(call, true);
+        } else {
+            requestPermissionForAlias("camera", call, "onResult");
+        }
+    }
+
+    @PermissionCallback
+    private void onResult(PluginCall call) {
+        resolve(call, getPermissionState("camera") == PermissionState.GRANTED);
+    }
+
+    /**
+     * Exports: blob-URL downloads and window.open() do nothing inside the
+     * Android WebView, so files are written to the cache and handed to the
+     * system share sheet (Drive, Gmail, Files, Messages...).
+     */
+    @PluginMethod
+    public void shareFile(PluginCall call) {
+        String name = call.getString("name", "floorline-export");
+        String mime = call.getString("mime", "application/octet-stream");
+        String data = call.getString("base64");
+        if (data == null) {
+            call.reject("No data");
+            return;
+        }
+        try {
+            File dir = new File(getContext().getCacheDir(), "exports");
+            if (!dir.exists() && !dir.mkdirs()) throw new Exception("Can't create cache dir");
+            File out = new File(dir, name.replaceAll("[^A-Za-z0-9._-]", "_"));
+            try (FileOutputStream fos = new FileOutputStream(out)) {
+                fos.write(Base64.decode(data, Base64.DEFAULT));
+            }
+            Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", out);
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(mime);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Intent chooser = Intent.createChooser(send, name);
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Couldn't share the file: " + e.getMessage(), e);
+        }
+    }
+
+    private void resolve(PluginCall call, boolean granted) {
+        JSObject r = new JSObject();
+        r.put("granted", granted);
+        call.resolve(r);
+    }
+}
