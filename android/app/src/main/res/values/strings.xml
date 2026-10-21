@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Floorline Beta</string>
-    <string name="title_activity_main">Floorline Beta</string>
-    <string name="package_name">com.tylerfranklin.floorline.beta</string>
-    <string name="custom_url_scheme">com.tylerfranklin.floorline.beta</string>
+    <string name="app_name">Floorline Beta 2</string>
+    <string name="title_activity_main">Floorline Beta 2</string>
+    <string name="package_name">com.tylerfranklin.floorline.beta2</string>
+    <string name="custom_url_scheme">com.tylerfranklin.floorline.beta2</string>
 </resources>

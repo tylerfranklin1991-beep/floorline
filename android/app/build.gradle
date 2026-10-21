@@ -1,20 +1,24 @@
 apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
 
 android {
-    namespace "com.tylerfranklin.floorline.beta"
+    namespace "com.tylerfranklin.floorline.beta2"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.tylerfranklin.floorline.beta"
+        applicationId "com.tylerfranklin.floorline.beta2"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.1.0-beta.3"
+        versionCode 4
+        versionName "0.2.0-beta2.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+    }
+    kotlinOptions {
+        jvmTarget = '21'
     }
     buildTypes {
         release {
@@ -36,6 +40,8 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // ARCore: plane detection + motion tracking for the AR room scan (Beta 2).
+    implementation 'com.google.ar:core:1.46.0'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

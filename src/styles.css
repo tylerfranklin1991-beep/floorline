@@ -1641,3 +1641,16 @@
     transform: none;
   }
 }
+
+/* Beta 2 ARCore scan: the camera is drawn natively behind a transparent WebView. */
+html.ar-scan-active,
+html.ar-scan-active body,
+html.ar-scan-active #root {
+  background: transparent !important;
+}
+html.ar-scan-active .ar-scan-host {
+  visibility: hidden;
+}
+html.ar-scan-active .ar-scan-layer {
+  visibility: visible;
+}
