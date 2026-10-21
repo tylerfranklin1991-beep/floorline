@@ -23,9 +23,11 @@ import { isArSupported } from "@/lib/field/ar";
 import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
   area,
+  bbox,
   formatArea,
   gridStep,
   levelView,
+  nearestWall,
   nextLevelName,
   nextRoomOrigin,
   newRoom,
@@ -35,6 +37,7 @@ import {
   ROOM_PRESETS,
   translate,
   uid,
+  type FieldOpening,
   type FieldProperty,
   type FieldRoom,
   type Pt,
@@ -47,6 +50,7 @@ import { PlanEditor, type EditorMode } from "./plan-editor";
 import { RoomPanel } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
+import { WalkMode, type WalkRoom } from "./walk-mode";
 
 export function FieldApp() {
   const property = useCurrentProperty();
@@ -185,7 +189,7 @@ function HomeScreen() {
 
 /* ------------------------------------------------------------ property */
 
-type Capture = null | { kind: "ar" | "walk"; name: string };
+type Capture = null | { kind: "ar" | "walk" | "walkmode"; name: string };
 
 function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const storedLevelId = useField((s) => s.currentLevelId);
@@ -250,6 +254,44 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     addRoom(r);
     setFitNonce((n) => n + 1);
     toast.success(`${r.name} added — now check the wall lengths`);
+  };
+
+  /** Commit a whole walk-mode session as one undo step, on the current level. */
+  const placeWalk = (walked: WalkRoom[], doorWidth: number) => {
+    const all = walked.flatMap((r) => r.points);
+    const box = bbox(all);
+    const origin = nextRoomOrigin(property.rooms);
+    const gap = property.rooms.length ? gridStep(property.units) * 4 : 0;
+    const dx = origin.x + gap - box.minX;
+    const dy = origin.y - box.minY;
+    const rooms: FieldRoom[] = [];
+    const openings: FieldOpening[] = [];
+    for (const w of walked) {
+      const r = { ...newRoom(w.name, translate(w.points, dx, dy), "walk"), levelId };
+      rooms.push(r);
+      if (w.door) {
+        const at = { x: w.door.at.x + dx, y: w.door.at.y + dy };
+        const hit = nearestWall(r.points, at);
+        openings.push({
+          id: uid("opening"),
+          roomId: r.id,
+          kind: "door",
+          wall: hit.wall,
+          offset: hit.offset,
+          width: doorWidth,
+        });
+      }
+    }
+    change((p) => ({
+      ...p,
+      rooms: [...p.rooms, ...rooms],
+      openings: [...p.openings, ...openings],
+    }));
+    select(rooms[rooms.length - 1].id);
+    setFitNonce((n) => n + 1);
+    toast.success(
+      `${rooms.length} room${rooms.length > 1 ? "s" : ""} added — drag walls or type lengths to tidy up`,
+    );
   };
 
   const step = property.rooms.length === 0 ? 1 : !room ? 2 : 3;
@@ -397,7 +439,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               setDrawName(name);
             } else if (how === "typed" && size) {
               void placeRoom(name, rectPoints(0, 0, size.w, size.h), "typed");
-            } else if (how === "ar" || how === "walk") {
+            } else if (how === "ar" || how === "walk" || how === "walkmode") {
               setCapture({ kind: how, name });
             }
           }}
@@ -427,6 +469,19 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             const name = capture.name;
             setCapture(null);
             void placeRoom(name, pts, "walk", photos);
+          }}
+        />
+      )}
+
+      {capture?.kind === "walkmode" && (
+        <WalkMode
+          units={property.units}
+          firstName={capture.name}
+          roomCount={property.rooms.length}
+          onCancel={() => setCapture(null)}
+          onDone={(walked, doorWidth) => {
+            setCapture(null);
+            placeWalk(walked, doorWidth);
           }}
         />
       )}
@@ -560,7 +615,7 @@ function AddRoomSheet({
   defaultName: string;
   onClose: () => void;
   onPick: (
-    how: "ar" | "walk" | "draw" | "typed",
+    how: "ar" | "walk" | "walkmode" | "draw" | "typed",
     name: string,
     size?: { w: number; h: number },
   ) => void;
@@ -615,6 +670,12 @@ function AddRoomSheet({
             }
             disabled={ar === false}
             onClick={() => onPick("ar", n)}
+          />
+          <MethodBtn
+            icon={<Footprints />}
+            title="Walk mode (room to room)"
+            body="Just walk along the walls. Steps + compass draw the path; tap Doorway between rooms."
+            onClick={() => onPick("walkmode", n)}
           />
           <MethodBtn
             icon={<Footprints />}

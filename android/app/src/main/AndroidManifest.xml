@@ -42,4 +42,10 @@
          asks for this at runtime when the page requests the camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Walk mode reads the accelerometer + compass through the WebView's
+         DeviceMotion/DeviceOrientation events: no runtime permission needed
+         (we don't use the hardware step counter, so no ACTIVITY_RECOGNITION).
+         Declared optional so the app still installs on devices without them. -->
+    <uses-feature android:name="android.hardware.sensor.accelerometer" android:required="false" />
+    <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
 </manifest>
