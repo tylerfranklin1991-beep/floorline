@@ -9,6 +9,8 @@
 
 export type Units = "ft" | "m";
 export type Pt = { x: number; y: number };
+import type { RoomFlooring, TransitionType } from "./materials.ts";
+
 export type OpeningKind = "door" | "window" | "opening";
 
 export interface RoomPhoto {
@@ -29,6 +31,8 @@ export interface FieldRoom {
   source: "ar" | "walk" | "draw" | "typed";
   /** Level (floor) this room is on. */
   levelId: string;
+  /** Flooring, carpet layout and trim settings (defaults apply when missing). */
+  flooring?: Partial<RoomFlooring>;
 }
 
 export interface FieldLevel {
@@ -66,6 +70,8 @@ export interface FieldOpening {
   /** Distance from the wall's start corner to the opening's centre. */
   offset: number;
   width: number;
+  /** Transition override at this doorway; automatic when missing. */
+  transition?: TransitionType;
 }
 
 export interface FieldProperty {
@@ -78,6 +84,12 @@ export interface FieldProperty {
   /** Floors, bottom to top is up to the user; there is always at least one. */
   levels: FieldLevel[];
   stairs: FieldStairs[];
+  /** Add stair area to floor totals. */
+  includeStairs?: boolean;
+  /** Pack narrow carpet fills together (across rooms) to save carpet. */
+  reuseFills?: boolean;
+  /** Show carpet seams on the plan and in exports (default on). */
+  showSeams?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -782,6 +794,7 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
       notes: typeof r.notes === "string" ? r.notes : "",
       source: r.source ?? "draw",
       levelId: typeof r.levelId === "string" && levelIds.has(r.levelId) ? r.levelId : fallback,
+      ...(r.flooring && typeof r.flooring === "object" ? { flooring: r.flooring } : {}),
     });
   }
   const ids = new Set(rooms.map((r) => r.id));
@@ -798,6 +811,9 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
           .map((s) => sanitizeStairs(s, levelIds, fallback))
           .filter((s): s is FieldStairs => Boolean(s))
       : [],
+    includeStairs: v.includeStairs === true,
+    reuseFills: v.reuseFills === true,
+    showSeams: v.showSeams !== false,
     createdAt: Number(v.createdAt) || Date.now(),
     updatedAt: Number(v.updatedAt) || Date.now(),
   };

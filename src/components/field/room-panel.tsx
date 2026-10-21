@@ -16,6 +16,18 @@ import {
   type FieldRoom,
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
+import {
+  baseboard,
+  carpetLayout,
+  formatLinear,
+  roomFlooring,
+  ROLL_WIDTHS_FT,
+  TRANSITION_LABEL,
+  transitions,
+  type FloorMaterial,
+  type RoomFlooring,
+  type TransitionType,
+} from "@/lib/field/materials";
 import { PhotoSlots } from "./photo-slots";
 
 const WALL_NAMES = (room: FieldRoom) =>
@@ -94,6 +106,11 @@ export function RoomPanel({
   const names = WALL_NAMES(room);
   const openings = property.openings.filter((o) => o.roomId === room.id);
   const u = property.units;
+  const fl = roomFlooring(room);
+  const setFl = (patch: Partial<RoomFlooring>) =>
+    updateRoom(room.id, { flooring: { ...(room.flooring ?? {}), ...patch } });
+  const lay = fl.material === "carpet" ? carpetLayout(room, u, fl) : null;
+  const trs = transitions(property);
 
   return (
     <div className="space-y-5 p-4">
@@ -159,6 +176,21 @@ export function RoomPanel({
             >
               <span className="text-base">
                 Wall {e.index + 1} <span className="text-black/50">({names[e.index]})</span>
+                <label className="ml-1 inline-flex items-center gap-1 text-xs text-black/60">
+                  <input
+                    type="checkbox"
+                    className="size-5"
+                    checked={!fl.noBaseWalls.includes(e.index)}
+                    onChange={(ev) =>
+                      setFl({
+                        noBaseWalls: ev.target.checked
+                          ? fl.noBaseWalls.filter((w) => w !== e.index)
+                          : [...fl.noBaseWalls, e.index],
+                      })
+                    }
+                  />
+                  base
+                </label>
               </span>
               <LengthInput
                 label={`Wall ${e.index + 1} length`}
@@ -224,6 +256,40 @@ export function RoomPanel({
               units={u}
               onCommit={(n) => (updateOpening(o.id, { offset: n }), true)}
             />
+            {o.kind !== "window" && (
+              <label className="flex w-full items-center gap-2 text-sm">
+                Transition
+                <select
+                  aria-label="Transition type"
+                  className="h-11 flex-1 rounded-xl border border-black/15 bg-white px-2 text-base"
+                  value={o.transition ?? "auto"}
+                  onChange={(ev) =>
+                    updateOpening(o.id, {
+                      transition:
+                        ev.target.value === "auto"
+                          ? undefined
+                          : (ev.target.value as TransitionType),
+                    })
+                  }
+                >
+                  <option value="auto">
+                    Auto (
+                    {
+                      TRANSITION_LABEL[
+                        trs.find((t) => t.openingId === o.id || t.twinOpeningId === o.id)?.type ??
+                          "t-mold"
+                      ]
+                    }
+                    )
+                  </option>
+                  {(Object.keys(TRANSITION_LABEL) as TransitionType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {TRANSITION_LABEL[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               type="button"
               aria-label={`Delete ${OPENING_LABEL[o.kind].toLowerCase()}`}
@@ -234,6 +300,111 @@ export function RoomPanel({
             </button>
           </div>
         ))}
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="text-base font-bold">Flooring &amp; trim</h3>
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Floor material">
+          {(
+            [
+              ["carpet", "Carpet"],
+              ["hard", "Hard / tile"],
+              ["none", "No floor"],
+            ] as [FloorMaterial, string][]
+          ).map(([m, label]) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={fl.material === m}
+              onClick={() => setFl({ material: m })}
+              className={`h-12 rounded-xl text-base font-semibold ${fl.material === m ? "bg-black text-white" : "bg-black/5"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {fl.material === "carpet" && (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm">Roll</span>
+              {ROLL_WIDTHS_FT.map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  aria-pressed={fl.rollWidthFt === w}
+                  onClick={() => setFl({ rollWidthFt: w })}
+                  className={`h-11 rounded-full px-4 text-base font-semibold ${fl.rollWidthFt === w ? "bg-[#b4561d] text-white" : "bg-black/5"}`}
+                >
+                  {u === "ft" ? `${w}'` : `${(w * 0.3048).toFixed(2)} m`}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setFl({ pileDeg: (fl.pileDeg + 90) % 360 })}
+                className="h-11 rounded-full bg-black/5 px-4 text-base font-semibold"
+                aria-label="Rotate pile direction"
+              >
+                Pile {["→", "↓", "←", "↑"][Math.round(fl.pileDeg / 90) % 4]} rotate
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <label className="flex items-center gap-1">
+                Trim/end (in)
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  className="h-11 w-16 rounded-xl border border-black/15 bg-white px-2 text-base"
+                  value={fl.trimIn}
+                  onChange={(e) => setFl({ trimIn: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                Waste %
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  className="h-11 w-16 rounded-xl border border-black/15 bg-white px-2 text-base"
+                  value={fl.wastePct}
+                  onChange={(e) => setFl({ wastePct: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </label>
+            </div>
+            {lay && (
+              <ul className="rounded-xl bg-black/[0.03] p-2 text-sm">
+                {lay.cuts.map((c, i) => (
+                  <li key={i}>
+                    Cut {i + 1}: {formatLength(c.length, u)} × {formatLength(c.width, u)}
+                    {c.fill ? " (fill)" : ""}
+                  </li>
+                ))}
+                <li className="font-semibold">
+                  {lay.seams.length} seam{lay.seams.length === 1 ? "" : "s"} ·{" "}
+                  {formatLinear(lay.length, u)} before waste
+                </li>
+              </ul>
+            )}
+          </>
+        )}
+        <div className="flex items-center justify-between rounded-xl bg-black/[0.03] p-2 text-sm">
+          <span>
+            Baseboard <b>{formatLinear(baseboard(property, room), u)}</b>
+            <span className="block text-xs text-black/50">
+              Untick “base” on a wall to skip it (cabinets)
+            </span>
+          </span>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="size-5"
+              checked={fl.quarterRound}
+              onChange={(e) => setFl({ quarterRound: e.target.checked })}
+            />
+            Quarter round
+          </label>
+        </div>
       </section>
 
       <section className="space-y-2">

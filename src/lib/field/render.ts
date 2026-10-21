@@ -14,6 +14,7 @@ import {
   stairsTreads,
   type FieldProperty,
 } from "./model.ts";
+import { carpetLayout, roomFlooring } from "./materials.ts";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -24,6 +25,10 @@ export type RenderOptions = {
   title?: boolean;
   /** Draw only this level (title gets the level name when there are several). */
   levelId?: string;
+  /** Draw carpet seams (dashed red). Defaults to the property's showSeams. */
+  seams?: boolean;
+  /** Draw a scale bar under the plan. */
+  scaleBar?: boolean;
 };
 
 /** One SVG per level, in level order. A single-level property gives one SVG. */
@@ -126,6 +131,24 @@ export function renderPlanSvg(full: FieldProperty, opts: RenderOptions = {}): st
       parts.push(
         `<text x="${cx}" y="${cy + font * 1.4}" font-size="${font * 0.75}" text-anchor="middle" fill="#555" stroke="#fff" stroke-width="${font * 0.2}" paint-order="stroke">to ${esc(to)}</text>`,
       );
+  }
+  if (opts.seams ?? full.showSeams !== false) {
+    for (const room of p.rooms) {
+      if (roomFlooring(room).material !== "carpet") continue;
+      for (const sm of carpetLayout(room, p.units).seams)
+        parts.push(
+          `<path d="M${sm.a.x} ${sm.a.y} L${sm.b.x} ${sm.b.y}" stroke="#d0342c" stroke-width="${0.08 / unit}" stroke-dasharray="${0.5 / unit} ${0.3 / unit}"/>`,
+        );
+    }
+  }
+  if (opts.scaleBar) {
+    const len = p.units === "ft" ? 10 : 3;
+    const x0 = f.x + 0.6 / unit;
+    const y0 = f.y + f.h - 0.8 / unit;
+    parts.push(
+      `<path d="M${x0} ${y0} h${len} M${x0} ${y0 - 0.3 / unit} v${0.6 / unit} M${x0 + len} ${y0 - 0.3 / unit} v${0.6 / unit}" stroke="#111" stroke-width="${0.08 / unit}"/>`,
+      `<text x="${x0 + len / 2}" y="${y0 - 0.4 / unit}" font-size="${font * 0.8}" text-anchor="middle" fill="#111">${p.units === "ft" ? "10 ft" : "3 m"}</text>`,
+    );
   }
   for (const room of p.rooms) {
     const c = centroid(room.points);
