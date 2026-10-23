@@ -85,7 +85,11 @@ export function RoomPanel({
   onPlace,
   onClose,
   onViewPhoto,
+  onNext,
+  selectedOpeningId,
 }: {
+  onNext?: () => void;
+  selectedOpeningId?: string | null;
   property: FieldProperty;
   room: FieldRoom;
   focusWall: number | null;
@@ -125,6 +129,15 @@ export function RoomPanel({
                 : "Drawn by hand"}
           </div>
         </div>
+        {onNext && (
+          <button
+            type="button"
+            onClick={onNext}
+            className="ml-auto h-12 rounded-full bg-[#b4561d] px-5 text-base font-bold text-white"
+          >
+            Next room →
+          </button>
+        )}
         <button
           type="button"
           onClick={onClose}
@@ -233,10 +246,12 @@ export function RoomPanel({
             <RectangleVertical className="size-5 shrink-0" /> Doorway
           </button>
         </div>
-        {openings.map((o) => (
+        {[...openings]
+          .sort((a, b) => Number(b.id === selectedOpeningId) - Number(a.id === selectedOpeningId))
+          .map((o) => (
           <div
             key={o.id}
-            className="flex flex-wrap items-center gap-2 rounded-xl bg-black/[0.03] p-2"
+            className={`flex flex-wrap items-center gap-2 rounded-xl p-2 ${o.id === selectedOpeningId ? "bg-[#f3dcc3] ring-2 ring-[#b4561d]" : "bg-black/[0.03]"}`}
           >
             <span className="w-20 text-base font-semibold">{OPENING_LABEL[o.kind]}</span>
             <span className="text-sm text-black/50">wall {o.wall + 1}</span>
@@ -305,9 +320,9 @@ export function RoomPanel({
       <AreasSection property={property} room={room} />
 
       <section className="space-y-2">
-        <h3 className="text-base font-bold">4 · Photos</h3>
+        <h3 className="text-base font-bold">4 · Photos &amp; video</h3>
         <p className="text-sm text-black/55">
-          1–2 snapshots so you can tell rooms apart later. They show on the plan.
+          Snapshots and walk-through clips. Photos show on the plan and in the PDF.
         </p>
         <PhotoSlots room={room} onView={onViewPhoto} />
       </section>
@@ -336,7 +351,11 @@ export function RoomPanel({
       <button
         type="button"
         onClick={() => {
-          if (window.confirm(`Delete ${room.name}? You can undo this.`)) deleteRoom(room.id);
+          const n = room.name;
+          deleteRoom(room.id);
+          toast(`${n} deleted`, {
+            action: { label: "Undo", onClick: () => useField.getState().undo() },
+          });
         }}
         className="flex h-14 w-full items-center justify-center gap-2 rounded-xl border border-red-800/30 text-base font-semibold text-red-800"
       >

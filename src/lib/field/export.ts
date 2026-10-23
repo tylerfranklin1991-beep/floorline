@@ -99,6 +99,7 @@ export function printPdf(p: FieldProperty) {
     .map(
       (r) =>
         `<div class="room"><h3>${escapeHtml(r.name)} <small>${p.levels.length > 1 ? `${escapeHtml(p.levels.find((l) => l.id === r.levelId)?.name ?? "")} · ` : ""}${formatArea(area(r.points), p.units)}</small></h3>${r.photos
+          .filter((ph) => ph.kind !== "video")
           .map((ph) => `<img src="${ph.thumb}"/>`)
           .join("")}${r.notes ? `<p>${escapeHtml(r.notes)}</p>` : ""}</div>`,
     )

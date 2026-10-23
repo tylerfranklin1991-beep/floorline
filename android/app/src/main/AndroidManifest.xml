@@ -42,6 +42,14 @@
          asks for this at runtime when the page requests the camera. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Geotags on room photos / videos and the job-site location (optional; denied = no tag). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <!-- Picking photos / videos from the gallery on older Android versions. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <!-- Walk mode reads the accelerometer + compass through the WebView's
          DeviceMotion/DeviceOrientation events: no runtime permission needed
          (we don't use the hardware step counter, so no ACTIVITY_RECOGNITION).

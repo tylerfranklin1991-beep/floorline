@@ -1,4 +1,7 @@
-import { X } from "lucide-react";
+import { MapPin, X } from "lucide-react";
+import { toast } from "sonner";
+import { formatGeo, getGeoTag, mapsUrl } from "@/lib/field/media";
+import { useBackClose } from "@/lib/field/back";
 import { useEffect, useState } from "react";
 import { jobSettings, type JobSettings } from "@/lib/field/job";
 import { ROLL_WIDTHS_FT } from "@/lib/field/materials";
@@ -90,12 +93,15 @@ export function JobSettingsSheet({
   const change = useField((s) => s.change);
   const j = jobSettings(property.job);
   const set = (patch: Partial<JobSettings>) => updateJob(patch);
+  useBackClose(true, onClose);
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f6f2e8]" data-testid="job-settings">
-      <header
-        className="sticky top-0 z-10 flex items-center gap-2 border-b border-black/10 bg-white px-3 py-2"
-        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
-      >
+    <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose}>
+    <div
+      className="absolute inset-x-0 bottom-0 top-[6dvh] overflow-y-auto rounded-t-3xl bg-[#f6f2e8] shadow-2xl"
+      data-testid="job-settings"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <header className="sticky top-0 z-10 flex items-center gap-2 rounded-t-3xl border-b border-black/10 bg-white px-3 py-2">
         <h1 className="flex-1 text-xl font-bold">Job settings</h1>
         <button
           type="button"
@@ -134,6 +140,7 @@ export function JobSettingsSheet({
             value={property.address}
             onCommit={(v) => change((p) => ({ ...p, address: v }))}
           />
+          <JobLocation property={property} />
           <Text
             label="Install date / time"
             value={j.installDate}
@@ -240,6 +247,56 @@ export function JobSettingsSheet({
             Add stairs on the plan and type the step count. These settings are remembered for your next job.
           </p>
         </section>
+      </div>
+    </div>
+    </div>
+  );
+}
+
+function JobLocation({ property }: { property: FieldProperty }) {
+  const change = useField((s) => s.change);
+  const [busy, setBusy] = useState(false);
+  const loc = property.location;
+  return (
+    <div className="space-y-2 rounded-xl bg-black/[0.03] p-3">
+      <div className="flex items-center gap-2 text-base font-semibold">
+        <MapPin className="size-5" /> Job-site location
+      </div>
+      {loc ? (
+        <div className="text-sm">
+          {formatGeo(loc)} · {new Date(loc.at).toLocaleString()}{" "}
+          <a className="font-semibold text-[#8a3b12] underline" href={mapsUrl(loc)} target="_blank" rel="noreferrer">
+            Map
+          </a>
+        </div>
+      ) : (
+        <div className="text-sm text-black/55">Not tagged. Stand at the house and tap below.</div>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            const g = await getGeoTag(12000);
+            setBusy(false);
+            if (!g) return toast.error("Couldn't get a GPS fix (location off, denied, or weak signal).");
+            change((p) => ({ ...p, location: g }));
+            toast.success("Job location tagged");
+          }}
+          className="h-12 flex-1 rounded-xl bg-black text-base font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Locating…" : loc ? "Re-tag here" : "Tag my location"}
+        </button>
+        {loc && (
+          <button
+            type="button"
+            onClick={() => change((p) => ({ ...p, location: undefined }))}
+            className="h-12 rounded-xl bg-black/5 px-4 text-base font-semibold"
+          >
+            Clear
+          </button>
+        )}
       </div>
     </div>
   );

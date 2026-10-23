@@ -51,6 +51,7 @@ export function PlanEditor({
   onModeDone,
   onWallTap,
   onPhotoTap,
+  onOpeningTap,
   fitNonce,
   drawName,
 }: {
@@ -59,6 +60,8 @@ export function PlanEditor({
   onModeDone: () => void;
   onWallTap: (roomId: string, wall: number) => void;
   onPhotoTap: (roomId: string, photoId: string) => void;
+  /** Tap on a door / window / doorway. */
+  onOpeningTap?: (roomId: string, openingId: string) => void;
   fitNonce: number;
   drawName?: string | null;
 }) {
@@ -69,6 +72,7 @@ export function PlanEditor({
   const pointers = useRef(new Map<number, Pt>());
   const selectedRoomId = useField((s) => s.selectedRoomId);
   const select = useField((s) => s.select);
+  const selectedOpeningId = useField((s) => s.selectedOpeningId);
   const preview = useField((s) => s.preview);
   const beginDrag = useField((s) => s.beginDrag);
   const commitDrag = useField((s) => s.commitDrag);
@@ -184,15 +188,16 @@ export function PlanEditor({
         if (!best || n.distance < best.distance - 1e-6) best = { roomId: r.id, ...n };
       }
       if (best && best.distance * view.scale < 48) {
+        const oid = uid("open");
         addOpening({
-          id: uid("open"),
+          id: oid,
           roomId: best.roomId,
           kind: mode,
           wall: best.wall,
           offset: snap(best.offset, step),
           width: defaultOpeningWidth(mode, property.units),
         });
-        select(best.roomId, null);
+        select(best.roomId, oid);
         onModeDone();
       }
       return;
@@ -220,6 +225,11 @@ export function PlanEditor({
     }
     if (h === "label" && room) {
       onWallTap(room.id, Number(target!.dataset.i));
+      return;
+    }
+    if (h === "opening" && room) {
+      select(room.id, target!.dataset.opening!);
+      onOpeningTap?.(room.id, target!.dataset.opening!);
       return;
     }
     if (h === "photo" && room) {
@@ -476,6 +486,18 @@ export function PlanEditor({
             const tip = { x: seg.a.x + seg.inward.x * w, y: seg.a.y + seg.inward.y * w };
             return (
               <g key={o.id}>
+                {o.id === selectedOpeningId && (
+                  <line
+                    x1={seg.a.x}
+                    y1={seg.a.y}
+                    x2={seg.b.x}
+                    y2={seg.b.y}
+                    stroke="#b4561d"
+                    strokeOpacity={0.45}
+                    strokeWidth={px(16)}
+                    strokeLinecap="round"
+                  />
+                )}
                 <line
                   x1={seg.a.x}
                   y1={seg.a.y}
@@ -603,14 +625,14 @@ export function PlanEditor({
                 >
                   {formatArea(area(room.points), property.units)}
                 </text>
-                {room.photos.map((ph, i) => (
+                {room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
                     key={ph.id}
                     data-h="photo"
                     data-room={room.id}
                     data-photo={ph.id}
                     href={ph.thumb}
-                    x={c.x - (room.photos.length * (thumbW + px(4))) / 2 + i * (thumbW + px(4))}
+                    x={c.x - (shown.length * (thumbW + px(4))) / 2 + i * (thumbW + px(4))}
                     y={c.y + fs * 1.5}
                     width={thumbW}
                     height={thumbW * 0.75}
@@ -712,6 +734,27 @@ export function PlanEditor({
               strokeDasharray={`${px(6)} ${px(4)}`}
             />
           )}
+          {/* Big invisible tap targets so doors / windows can be picked with a thumb. */}
+          {property.openings.map((o) => {
+            const room = property.rooms.find((r) => r.id === o.roomId);
+            const seg = room && openingSegment(room, o);
+            if (!seg) return null;
+            return (
+              <line
+                key={`hit-${o.id}`}
+                data-h="opening"
+                data-room={o.roomId}
+                data-opening={o.id}
+                x1={seg.a.x}
+                y1={seg.a.y}
+                x2={seg.b.x}
+                y2={seg.b.y}
+                stroke="transparent"
+                strokeWidth={px(30)}
+                style={{ cursor: "pointer" }}
+              />
+            );
+          })}
         </g>
       </svg>
       {drag?.kind === "draw" && (

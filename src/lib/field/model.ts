@@ -20,6 +20,32 @@ export interface RoomPhoto {
   /** Small JPEG data URL so the diagram and exports can show it without IndexedDB. */
   thumb: string;
   takenAt: number;
+  /** "video" entries keep the clip in IndexedDB; `thumb` is a still frame. Missing = photo (old saves). */
+  kind?: "photo" | "video";
+  mime?: string;
+  /** Seconds, videos only. */
+  duration?: number;
+  /** Where it was taken, when the phone could tell (missing if denied / no fix). */
+  geo?: GeoTag;
+}
+
+export interface GeoTag {
+  lat: number;
+  lng: number;
+  /** Metres. */
+  accuracy?: number;
+  at: number;
+}
+
+export function sanitizeGeo(v: unknown): GeoTag | undefined {
+  const g = v as Partial<GeoTag> | null;
+  if (!g || !Number.isFinite(g.lat) || !Number.isFinite(g.lng)) return undefined;
+  return {
+    lat: Number(g.lat),
+    lng: Number(g.lng),
+    ...(Number.isFinite(g.accuracy) ? { accuracy: Number(g.accuracy) } : {}),
+    at: Number(g.at) || Date.now(),
+  };
 }
 
 export interface FieldRoom {
@@ -98,6 +124,8 @@ export interface FieldProperty {
   id: string;
   name: string;
   address: string;
+  /** Job-site GPS tag (optional). */
+  location?: GeoTag;
   units: Units;
   rooms: FieldRoom[];
   openings: FieldOpening[];
@@ -116,7 +144,8 @@ export interface FieldProperty {
   updatedAt: number;
 }
 
-export const MAX_PHOTOS_PER_ROOM = 2;
+/** Photos + videos per room. */
+export const MAX_PHOTOS_PER_ROOM = 12;
 
 export const ROOM_PRESETS = [
   "Living",
@@ -877,6 +906,7 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     id: v.id,
     name: typeof v.name === "string" ? v.name : "Property",
     address: typeof v.address === "string" ? v.address : "",
+    ...(sanitizeGeo(v.location) ? { location: sanitizeGeo(v.location) } : {}),
     units: v.units === "m" ? "m" : "ft",
     rooms,
     openings: Array.isArray(v.openings) ? v.openings.filter((o) => o && ids.has(o.roomId)) : [],

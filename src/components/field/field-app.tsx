@@ -17,6 +17,11 @@ import {
   ChartNoAxesColumnIncreasing as StairsIcon,
   Pencil,
   Settings2,
+  DoorOpen,
+  Layers,
+  PanelTop,
+  RectangleVertical,
+  MapPin,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -50,6 +55,8 @@ import {
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
 import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
+import { installBackHandler, useBackClose } from "@/lib/field/back";
+import { formatGeo, mapsUrl } from "@/lib/field/media";
 import { MaterialsScreen } from "./materials-screen";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
@@ -72,6 +79,16 @@ setOnSaveError(() => {
 export function FieldApp() {
   const property = useCurrentProperty();
   const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    installBackHandler(() => {
+      const st = useField.getState();
+      if (st.currentId) {
+        st.openProperty(null);
+        return true;
+      }
+      return false;
+    });
+  }, []);
   useEffect(() => {
     if (useField.persist.hasHydrated()) setHydrated(true);
     return useField.persist.onFinishHydration(() => setHydrated(true));
@@ -225,6 +242,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const canUndo = useField((s) => (s.history?.past.length ?? 0) > 0);
   const canRedo = useField((s) => (s.history?.future.length ?? 0) > 0);
   const selectedRoomId = useField((s) => s.selectedRoomId);
+  const selectedOpeningId = useField((s) => s.selectedOpeningId);
   const select = useField((s) => s.select);
   const addRoom = useField((s) => s.addRoom);
   const setUnits = useField((s) => s.setUnits);
@@ -236,9 +254,26 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [menu, setMenu] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
   const [showMaterials, setShowMaterials] = useState(false);
+  const [openingPick, setOpeningPick] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
+
+  // Android back: close the top-most thing first (registration order = stacking order).
+  useBackClose(Boolean(room) && !stairs, () => {
+    select(null);
+    setFocusWall(null);
+  });
+  useBackClose(Boolean(stairs), () => selectStairs(null));
+  useBackClose(mode !== "select", () => setMode("select"));
+  useBackClose(adding, () => setAdding(false));
+  useBackClose(openingPick, () => setOpeningPick(false));
+  useBackClose(menu, () => setMenu(false));
+  useBackClose(Boolean(capture), () => setCapture(null));
+  useBackClose(Boolean(photo), () => setPhoto(null));
+
+  useEffect(() => setCollapsed(false), [selectedRoomId, selectedStairsId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -255,6 +290,28 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
+
+  const nextName = () => `Room ${property.rooms.length + 1}`;
+
+  /** "Next room": the next room on this floor, or start adding a new one. */
+  const nextRoom = () => {
+    const i = property.rooms.findIndex((r) => r.id === selectedRoomId);
+    const after = i >= 0 ? property.rooms[i + 1] : undefined;
+    setFocusWall(null);
+    if (after) {
+      select(after.id);
+    } else {
+      select(null);
+      setAdding(true);
+    }
+  };
+
+  const startMode = (m: EditorMode) => {
+    setMode(m);
+    setOpeningPick(false);
+    if (m === "stairs" || m === "draw") select(null);
+    if (m === "draw") setDrawName(nextName());
+  };
 
   const placeRoom = async (
     name: string,
@@ -275,7 +332,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     }
     addRoom(r);
     setFitNonce((n) => n + 1);
-    toast.success(`${r.name} added — now check the wall lengths`);
+    toast.success(`${r.name} added — tap a wall length to adjust`);
   };
 
   /** Commit a whole walk-mode session as one undo step, on the current level. */
@@ -321,7 +378,13 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     );
   };
 
-  const step = property.rooms.length === 0 ? 1 : !room ? 2 : 3;
+  const MODE_HINT: Partial<Record<EditorMode, string>> = {
+    draw: `Drag on the grid to draw ${drawName ?? "a room"}`,
+    door: "Tap a wall to place a door",
+    window: "Tap a wall to place a window",
+    opening: "Tap a wall to place a doorway",
+    stairs: "Tap where the stairs go",
+  };
 
   return (
     <div className="flex h-dvh flex-col bg-[#f6f2e8]">
@@ -335,7 +398,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <input
           aria-label="Property name"
           defaultValue={property.name}
-          key={property.id}
+          key={property.id + property.name}
           onBlur={(e) =>
             e.target.value.trim() &&
             e.target.value !== property.name &&
@@ -352,27 +415,18 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <IconBtn label="Job settings" onClick={() => setJobOpen(true)}>
           <Settings2 />
         </IconBtn>
-        <IconBtn label="Export" onClick={() => setMenu(true)}>
-          <Download />
-        </IconBtn>
       </header>
-
-      <div className="flex items-center gap-2 overflow-x-auto bg-white/70 px-3 py-2 text-sm">
-        {["Add a room", "Capture or draw it", "Name, measure, photo"].map((t, i) => (
-          <span
-            key={t}
-            className={`whitespace-nowrap rounded-full px-3 py-1 ${step === i + 1 ? "bg-[#b4561d] text-white" : "bg-black/5 text-black/60"}`}
-          >
-            {i + 1}. {t}
-          </span>
-        ))}
-      </div>
 
       <LevelBar property={full} levelId={levelId} />
 
-      <AreaBar property={full} levelId={levelId} onOpen={() => setShowMaterials(true)} />
+      <AreaBar
+        property={full}
+        levelId={levelId}
+        onOpen={() => setShowMaterials(true)}
+        onUnits={() => setUnits(property.units === "ft" ? "m" : "ft")}
+      />
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <PlanEditor
           property={property}
           mode={mode}
@@ -383,90 +437,124 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             select(roomId);
             setFocusWall(wall);
           }}
+          onOpeningTap={() => setFocusWall(null)}
           onPhotoTap={(roomId, photoId) => setPhoto({ roomId, photoId })}
         />
         {property.rooms.length === 0 && mode === "select" && (
-          <div className="pointer-events-none absolute inset-x-0 top-1/3 text-center text-lg text-black/50">
-            Tap “Add room” to start
+          <div className="pointer-events-none absolute inset-x-0 top-1/3 px-6 text-center text-lg text-black/50">
+            Tap <b>Add room</b> below to start.
+            <br />
+            Tap any room, wall length or door to edit it.
           </div>
         )}
         {mode !== "select" && (
-          <button
-            type="button"
-            onClick={() => setMode("select")}
-            className="absolute bottom-3 left-3 h-12 rounded-full bg-black px-5 text-base font-semibold text-white"
+          <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
+            <span className="flex-1">{MODE_HINT[mode]}</span>
+            <button
+              type="button"
+              onClick={() => setMode("select")}
+              className="h-12 rounded-xl bg-white px-5 text-base font-bold text-black"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {(stairs || room) && mode === "select" && (
+          <div
+            className="absolute inset-x-0 bottom-0 z-20 flex max-h-[68%] flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]"
+            role="dialog"
+            aria-label="Inspector"
           >
-            Cancel
-          </button>
+            <button
+              type="button"
+              aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
+              onClick={() => setCollapsed((c) => !c)}
+              className="flex h-8 w-full shrink-0 items-center justify-center"
+            >
+              <span className="h-1.5 w-12 rounded-full bg-black/25" />
+            </button>
+            {collapsed ? (
+              <div className="flex items-center gap-2 px-4 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setCollapsed(false)}
+                  className="h-12 flex-1 text-left text-lg font-bold"
+                >
+                  {stairs ? "Stairs" : room!.name} · <span className="font-normal">tap to edit</span>
+                </button>
+                {room && !stairs && (
+                  <button
+                    type="button"
+                    onClick={nextRoom}
+                    className="h-12 rounded-full bg-[#b4561d] px-5 text-base font-bold text-white"
+                  >
+                    Next room →
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="min-h-0 overflow-y-auto overscroll-contain">
+                {stairs ? (
+                  <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
+                ) : (
+                  <RoomPanel
+                    property={property}
+                    room={room!}
+                    focusWall={focusWall}
+                    selectedOpeningId={selectedOpeningId}
+                    onPlace={(k) => setMode(k)}
+                    onNext={nextRoom}
+                    onClose={() => {
+                      select(null);
+                      setFocusWall(null);
+                    }}
+                    onViewPhoto={(photoId) => setPhoto({ roomId: room!.id, photoId })}
+                  />
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {stairs ? (
-        <div
-          className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      <nav
+        className="grid grid-cols-6 gap-1 border-t border-black/10 bg-white px-1 pt-1"
+        style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom))" }}
+        aria-label="Tools"
+      >
+        <ToolBtn label="Add room" primary onClick={() => setAdding(true)}>
+          <Plus />
+        </ToolBtn>
+        <ToolBtn label="Draw" active={mode === "draw"} onClick={() => startMode("draw")}>
+          <Grid2x2Plus />
+        </ToolBtn>
+        <ToolBtn
+          label="Doors"
+          active={mode === "door" || mode === "window" || mode === "opening"}
+          onClick={() => setOpeningPick(true)}
         >
-          <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
-        </div>
-      ) : room ? (
-        <div
-          className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-        >
-          <RoomPanel
-            property={property}
-            room={room}
-            focusWall={focusWall}
-            onPlace={(k) => setMode(k)}
-            onClose={() => {
-              select(null);
-              setFocusWall(null);
-            }}
-            onViewPhoto={(photoId) => setPhoto({ roomId: room.id, photoId })}
-          />
-        </div>
-      ) : (
-        <div
-          className="grid grid-cols-[1fr_auto_auto] gap-2 border-t border-black/10 bg-white p-3"
-          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
-        >
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="flex h-16 items-center justify-center gap-2 rounded-2xl bg-[#b4561d] text-xl font-bold text-white"
-          >
-            <Plus /> Add room
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("stairs");
-              select(null);
-            }}
-            className="flex h-16 flex-col items-center justify-center rounded-2xl bg-black/5 px-3 text-sm font-semibold"
-          >
-            <StairsIcon className="size-5" /> Stairs
-          </button>
-          <button
-            type="button"
-            onClick={() => setUnits(property.units === "ft" ? "m" : "ft")}
-            className="h-16 rounded-2xl bg-black/5 px-4 text-base font-semibold"
-            aria-label="Switch units"
-          >
-            {property.units === "ft" ? "ft" : "m"}
-          </button>
-        </div>
-      )}
+          <DoorOpen />
+        </ToolBtn>
+        <ToolBtn label="Stairs" active={mode === "stairs"} onClick={() => startMode("stairs")}>
+          <StairsIcon />
+        </ToolBtn>
+        <ToolBtn label="Materials" onClick={() => setShowMaterials(true)}>
+          <Layers />
+        </ToolBtn>
+        <ToolBtn label="Export" onClick={() => setMenu(true)}>
+          <Download />
+        </ToolBtn>
+      </nav>
 
       {adding && (
         <AddRoomSheet
           units={property.units}
-          defaultName={`Room ${property.rooms.length + 1}`}
+          defaultName={nextName()}
           onClose={() => setAdding(false)}
           onPick={(how, name, size) => {
             setAdding(false);
             if (how === "draw") {
-              toast("Drag on the grid to draw " + name);
               setMode("draw");
               setDrawName(name);
             } else if (how === "typed" && size) {
@@ -476,6 +564,22 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             }
           }}
         />
+      )}
+
+      {openingPick && (
+        <Sheet title="Doors, windows & transitions" onClose={() => setOpeningPick(false)}>
+          <div className="grid gap-2">
+            <p className="text-base text-black/60">
+              {room
+                ? `Then tap a wall of ${room.name}.`
+                : "Then tap any wall on the plan."}{" "}
+              Tap a placed door later to set its width, position and transition.
+            </p>
+            <MethodBtn icon={<DoorOpen />} title="Door" body="Swing door with transition." onClick={() => startMode("door")} />
+            <MethodBtn icon={<RectangleVertical />} title="Doorway / opening" body="Cased opening, no door. Gets a transition." onClick={() => startMode("opening")} />
+            <MethodBtn icon={<PanelTop />} title="Window" body="Shown on the plan only." onClick={() => startMode("window")} />
+          </div>
+        </Sheet>
       )}
 
       {jobOpen && <JobSettingsSheet property={full} onClose={() => setJobOpen(false)} />}
@@ -527,37 +631,72 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   );
 }
 
-/** Always-visible live square footage: this floor, whole property, and a Materials shortcut. */
+function ToolBtn({
+  label,
+  onClick,
+  active,
+  primary,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  primary?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`flex h-16 flex-col items-center justify-center gap-0.5 rounded-xl text-xs font-semibold ${primary ? "bg-[#b4561d] text-white" : active ? "bg-black text-white" : "text-black/80 active:bg-black/10"}`}
+    >
+      {children}
+      {label}
+    </button>
+  );
+}
+
+/** Always-visible live square footage: this floor, whole property, units and a Materials shortcut. */
 function AreaBar({
   property,
   levelId,
   onOpen,
+  onUnits,
 }: {
   property: FieldProperty;
   levelId: string;
   onOpen: () => void;
+  onUnits: () => void;
 }) {
   const s = areaSummary(property);
   const lvl = s.levels.find((l) => l.id === levelId);
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex min-h-12 items-center gap-3 border-b border-black/10 bg-[#fff8ec] px-3 text-left text-base"
-      aria-label="Open materials summary"
-    >
-      {property.levels.length > 1 && lvl && (
+    <div className="flex min-h-12 items-center gap-2 border-b border-black/10 bg-[#fff8ec] px-3 text-base">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-12 flex-1 items-center gap-3 text-left"
+        aria-label="Open materials summary"
+      >
+        {property.levels.length > 1 && lvl && (
+          <span>
+            {lvl.name} <b>{formatArea(lvl.area, property.units)}</b>
+          </span>
+        )}
         <span>
-          {lvl.name} <b>{formatArea(lvl.area, property.units)}</b>
+          Total <b>{formatArea(s.total, property.units)}</b>
         </span>
-      )}
-      <span>
-        Total <b>{formatArea(s.total, property.units)}</b>
-      </span>
-      <span className="ml-auto rounded-full bg-[#b4561d] px-3 py-1 text-sm font-semibold text-white">
-        Materials
-      </span>
-    </button>
+      </button>
+      <button
+        type="button"
+        onClick={onUnits}
+        aria-label="Switch units"
+        className="h-10 rounded-full bg-black/5 px-4 text-sm font-semibold"
+      >
+        {property.units === "ft" ? "ft" : "m"}
+      </button>
+    </div>
   );
 }
 
@@ -566,28 +705,10 @@ function LevelBar({ property, levelId }: { property: FieldProperty; levelId: str
   const addLevel = useField((s) => s.addLevel);
   const renameLevel = useField((s) => s.renameLevel);
   const deleteLevel = useField((s) => s.deleteLevel);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  useBackClose(editing, () => setEditing(false));
   const current = property.levels.find((l) => l.id === levelId);
-  const edit = () => {
-    if (!current) return;
-    const name = window.prompt(
-      property.levels.length > 1
-        ? `Rename "${current.name}" (leave empty and OK to delete this level)`
-        : `Rename "${current.name}"`,
-      current.name,
-    );
-    if (name === null) return;
-    if (!name.trim() && property.levels.length > 1) {
-      const n = property.rooms.filter((r) => r.levelId === levelId).length;
-      if (
-        window.confirm(
-          `Delete ${current.name}${n ? ` and its ${n} room(s)` : ""}? You can undo this.`,
-        )
-      )
-        deleteLevel(levelId);
-      return;
-    }
-    renameLevel(levelId, name);
-  };
   return (
     <div
       className="flex items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
@@ -602,7 +723,11 @@ function LevelBar({ property, levelId }: { property: FieldProperty; levelId: str
             type="button"
             role="tab"
             aria-selected={on}
-            onClick={() => (on ? edit() : setLevel(l.id))}
+            onClick={() => {
+              if (!on) return setLevel(l.id);
+              setName(l.name);
+              setEditing(true);
+            }}
             className={`flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-4 text-base font-semibold ${on ? "bg-black text-white" : "bg-black/5"}`}
           >
             {l.name}
@@ -613,13 +738,59 @@ function LevelBar({ property, levelId }: { property: FieldProperty; levelId: str
       <button
         type="button"
         onClick={() => {
-          const name = window.prompt("Name the new level", nextLevelName(property));
-          if (name !== null) addLevel(name || nextLevelName(property));
+          const n = nextLevelName(property);
+          addLevel(n);
+          toast(`${n} added — tap it to rename`);
         }}
         className="flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-black/30 px-4 text-base font-semibold"
       >
         <Plus className="size-4" /> Level
       </button>
+      {editing && current && (
+        <Sheet title="Floor / level" onClose={() => setEditing(false)}>
+          <div className="space-y-3">
+            <input
+              aria-label="Level name"
+              value={name}
+              autoFocus
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  renameLevel(levelId, name);
+                  setEditing(false);
+                }
+              }}
+              className="h-14 w-full rounded-xl border border-black/15 px-4 text-xl"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                renameLevel(levelId, name);
+                setEditing(false);
+              }}
+              className="h-14 w-full rounded-xl bg-black text-lg font-bold text-white"
+            >
+              Save name
+            </button>
+            {property.levels.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const n = property.rooms.filter((r) => r.levelId === levelId).length;
+                  deleteLevel(levelId);
+                  setEditing(false);
+                  toast(`${current.name}${n ? ` and ${n} room(s)` : ""} deleted`, {
+                    action: { label: "Undo", onClick: () => useField.getState().undo() },
+                  });
+                }}
+                className="flex h-14 w-full items-center justify-center gap-2 rounded-xl border border-red-800/30 text-base font-semibold text-red-800"
+              >
+                <Trash2 className="size-5" /> Delete this level
+              </button>
+            )}
+          </div>
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -658,6 +829,7 @@ function Sheet({
   children: React.ReactNode;
   title: string;
 }) {
+  useBackClose(true, onClose);
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={onClose}>
       <div
@@ -667,7 +839,17 @@ function Sheet({
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-2xl font-bold">{title}</h2>
+        <div className="mb-4 flex items-center gap-2">
+          <h2 className="flex-1 text-2xl font-bold">{title}</h2>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex size-12 items-center justify-center rounded-full bg-black/5 text-2xl"
+          >
+            ×
+          </button>
+        </div>
         {children}
       </div>
     </div>
@@ -924,10 +1106,47 @@ function PhotoViewer({
     };
   }, [photoId]);
   if (!room || !ph) return null;
+  const isVideo = ph.kind === "video";
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black" onClick={onClose}>
-      <div className="p-4 text-xl font-bold text-white">{room.name}</div>
-      <img src={src ?? ph.thumb} alt={room.name} className="min-h-0 flex-1 object-contain" />
+      <div className="p-4 text-white" style={{ paddingTop: "max(1rem, env(safe-area-inset-top))" }}>
+        <div className="text-xl font-bold">{room.name}</div>
+        <div className="text-sm text-white/70">
+          {new Date(ph.takenAt).toLocaleString()}
+          {ph.geo ? (
+            <>
+              {" · "}
+              <a
+                href={mapsUrl(ph.geo)}
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MapPin className="inline size-3" /> {formatGeo(ph.geo)}
+              </a>
+            </>
+          ) : (
+            " · no location"
+          )}
+        </div>
+      </div>
+      {isVideo ? (
+        src ? (
+          <video
+            src={src}
+            controls
+            autoPlay
+            playsInline
+            className="min-h-0 flex-1 bg-black"
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <img src={ph.thumb} alt={room.name} className="min-h-0 flex-1 object-contain" />
+        )
+      ) : (
+        <img src={src ?? ph.thumb} alt={room.name} className="min-h-0 flex-1 object-contain" />
+      )}
       <button type="button" className="m-4 h-14 rounded-2xl bg-white/15 text-lg text-white">
         Close
       </button>

@@ -65,7 +65,7 @@ export async function prepareFromSource(
   return { full, thumb };
 }
 
-export async function prepareFromFile(file: File): Promise<PreparedPhoto> {
+export async function prepareFromFile(file: Blob): Promise<PreparedPhoto> {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();

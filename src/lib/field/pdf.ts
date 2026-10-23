@@ -94,7 +94,10 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
     doc.setFontSize(10);
     const j = jobSettings(full.job);
     const who = [j.customer, j.phone].filter(Boolean).join(" · ");
-    const line2 = [who, full.address].filter(Boolean).join(" — ");
+    const gps = full.location
+      ? `GPS ${full.location.lat.toFixed(5)}, ${full.location.lng.toFixed(5)}`
+      : "";
+    const line2 = [who, full.address, gps].filter(Boolean).join(" — ");
     if (line2) doc.text(doc.splitTextToSize(line2, 5) as string[], M + 0.15, M + 0.58);
     doc.text(`Floor: ${floor}`, M + 0.15, M + 0.8);
     doc.text(`Date: ${date}`, PW - M - 0.15, M + 0.35, { align: "right" });
@@ -156,40 +159,68 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
   installerSheet(doc, full, titleBlock, levels.length > 1 ? "All floors" : levels[0].name);
 
   // Snapshots page.
-  const withPhotos = full.rooms.filter((r) => r.photos.length);
+  const stills = (r: (typeof full.rooms)[number]) => r.photos.filter((ph) => ph.kind !== "video");
+  const withPhotos = full.rooms.filter((r) => stills(r).length);
   if (withPhotos.length) {
     doc.addPage();
     titleBlock(levels.length > 1 ? "All floors" : levels[0].name, "Room snapshots");
     let y = M + 1.2;
     const colW = (PW - 2 * M - 0.2) / 2;
     for (const r of withPhotos) {
+      const list = stills(r);
       const imgs = await Promise.all(
-        r.photos.map(async (ph) => {
+        list.map(async (ph) => {
           const b = await loadPhotoBlob(ph.id).catch(() => undefined);
           if (b) return blobToJpeg(b).catch(() => ({ url: ph.thumb, w: 4, h: 3 }));
           return { url: ph.thumb, w: 4, h: 3 };
         }),
       );
-      const h = Math.max(...imgs.map((im) => (colW * im.h) / im.w), 1);
-      const rowH = Math.min(h, 3.2) + 0.35;
-      if (y + rowH > PH - M) {
-        doc.addPage();
-        y = M;
-      }
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
+      const videos = r.photos.length - list.length;
       const lvl =
         full.levels.length > 1
           ? ` · ${full.levels.find((x) => x.id === r.levelId)?.name ?? ""}`
           : "";
-      doc.text(`${r.name}${lvl} — ${formatArea(area(r.points), u)}`, M, y + 0.15);
-      imgs.forEach((im, j) => {
-        const ih = Math.min((colW * im.h) / im.w, 3.2);
-        const iw = (ih * im.w) / im.h;
-        const fmt = im.url.startsWith("data:image/png") ? "PNG" : "JPEG";
-        doc.addImage(im.url, fmt, M + j * (colW + 0.2), y + 0.25, iw, ih);
-      });
-      y += rowH + 0.15;
+      let titled = false;
+      // Two photos per row, wrapping; caption = time + GPS.
+      for (let j = 0; j < imgs.length; j += 2) {
+        const pair = imgs.slice(j, j + 2);
+        const h = Math.max(...pair.map((im) => (colW * im.h) / im.w), 1);
+        const imgH = Math.min(h, 3.2);
+        const rowH = imgH + 0.3 + (titled ? 0 : 0.25);
+        if (y + rowH > PH - M) {
+          doc.addPage();
+          y = M;
+        }
+        if (!titled) {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(11);
+          doc.text(
+            `${r.name}${lvl} — ${formatArea(area(r.points), u)}${videos ? ` (+${videos} video${videos > 1 ? "s" : ""} on phone)` : ""}`,
+            M,
+            y + 0.15,
+          );
+          y += 0.25;
+          titled = true;
+        }
+        pair.forEach((im, k) => {
+          const ph = list[j + k];
+          const ih = Math.min((colW * im.h) / im.w, 3.2);
+          const iw = Math.min((ih * im.w) / im.h, colW);
+          const fmt = im.url.startsWith("data:image/png") ? "PNG" : "JPEG";
+          const x = M + k * (colW + 0.2);
+          doc.addImage(im.url, fmt, x, y, iw, ih);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7.5);
+          const cap = [
+            new Date(ph.takenAt).toLocaleString(),
+            ph.geo ? `GPS ${ph.geo.lat.toFixed(5)}, ${ph.geo.lng.toFixed(5)}` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          doc.text(cap, x, y + ih + 0.14);
+        });
+        y += imgH + 0.4;
+      }
     }
   }
   return doc.output("blob");

@@ -1,3 +1,4 @@
+import { useBackClose } from "@/lib/field/back";
 import { ArrowLeft, FileText } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -85,13 +86,15 @@ export function MaterialsScreen({
       setBusy(false);
     }
   };
+  useBackClose(!settings, onClose);
   if (settings) return <JobSettingsSheet property={property} onClose={() => setSettings(false)} />;
   return (
-    <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f6f2e8]">
-      <header
-        className="sticky top-0 z-10 flex items-center gap-2 border-b border-black/10 bg-white px-2 py-2"
-        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
-      >
+    <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose}>
+    <div
+      className="absolute inset-x-0 bottom-0 top-[6dvh] overflow-y-auto rounded-t-3xl bg-[#f6f2e8] shadow-2xl"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <header className="sticky top-0 z-10 flex items-center gap-2 rounded-t-3xl border-b border-black/10 bg-white px-2 py-2">
         <button
           type="button"
           aria-label="Back to plan"
@@ -349,6 +352,7 @@ export function MaterialsScreen({
           )}
         </section>
       </div>
+    </div>
     </div>
   );
 }
