@@ -78,6 +78,48 @@ export interface RoomArea {
 export interface FieldLevel {
   id: string;
   name: string;
+  /** Background image to trace over (sketch or photo). */
+  trace?: TraceImage;
+}
+
+/** Trace background, placed in plan units. Image blob lives in IndexedDB under `imageId`. */
+export interface TraceImage {
+  imageId: string;
+  /** Top-left corner on the plan. */
+  x: number;
+  y: number;
+  /** Width on the plan; height = width * aspect. */
+  w: number;
+  /** Image height / width. */
+  aspect: number;
+  /** Degrees, about the top-left corner. */
+  rot: number;
+  opacity: number;
+  locked: boolean;
+  hidden: boolean;
+  /** Set once two points were calibrated to a real distance. */
+  calibrated?: boolean;
+}
+
+export function sanitizeTrace(v: unknown): TraceImage | undefined {
+  const t = v as Partial<TraceImage> | null;
+  if (!t || typeof t.imageId !== "string") return undefined;
+  const num = (x: unknown, d: number) => (Number.isFinite(Number(x)) ? Number(x) : d);
+  const w = num(t.w, 20);
+  const aspect = num(t.aspect, 0.75);
+  if (w <= 0 || aspect <= 0) return undefined;
+  return {
+    imageId: t.imageId,
+    x: num(t.x, 0),
+    y: num(t.y, 0),
+    w,
+    aspect,
+    rot: num(t.rot, 0),
+    opacity: Math.min(1, Math.max(0.05, num(t.opacity, 0.45))),
+    locked: t.locked === true,
+    hidden: t.hidden === true,
+    ...(t.calibrated ? { calibrated: true } : {}),
+  };
 }
 
 /** Direction the stairs arrow points (the way you walk when going UP/DOWN). */
@@ -862,7 +904,14 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
   const levels: FieldLevel[] = Array.isArray(v.levels)
     ? v.levels
         .filter((l) => l && typeof l.id === "string")
-        .map((l) => ({ id: l.id, name: typeof l.name === "string" && l.name ? l.name : "Level" }))
+        .map((l) => {
+          const trace = sanitizeTrace(l.trace);
+          return {
+            id: l.id,
+            name: typeof l.name === "string" && l.name ? l.name : "Level",
+            ...(trace ? { trace } : {}),
+          };
+        })
     : [];
   if (levels.length === 0) levels.push({ id: "level-main", name: "Main" });
   const levelIds = new Set(levels.map((l) => l.id));

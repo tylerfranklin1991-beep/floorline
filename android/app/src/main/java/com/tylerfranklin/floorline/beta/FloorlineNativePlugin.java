@@ -7,7 +7,15 @@ import android.util.Base64;
 import androidx.core.content.FileProvider;
 import java.io.File;
 import java.io.FileOutputStream;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Rect;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -71,6 +79,61 @@ public class FloorlineNativePlugin extends Plugin {
         } catch (Exception e) {
             call.reject("Couldn't share the file: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * On-device OCR (Google ML Kit Text Recognition v2, bundled Latin model:
+     * no network, no API key). Input: base64 JPEG/PNG. Output: text lines
+     * with pixel bounding boxes, plus the image size.
+     */
+    @PluginMethod
+    public void recognizeText(PluginCall call) {
+        String data = call.getString("base64");
+        if (data == null) {
+            call.reject("No image");
+            return;
+        }
+        Bitmap bmp;
+        try {
+            byte[] bytes = Base64.decode(data, Base64.DEFAULT);
+            bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        } catch (Exception e) {
+            call.reject("Bad image", e);
+            return;
+        }
+        if (bmp == null) {
+            call.reject("Bad image");
+            return;
+        }
+        final int w = bmp.getWidth();
+        final int h = bmp.getHeight();
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+            .process(InputImage.fromBitmap(bmp, 0))
+            .addOnSuccessListener(result -> {
+                JSArray lines = new JSArray();
+                int b = 0;
+                for (Text.TextBlock block : result.getTextBlocks()) {
+                    for (Text.Line line : block.getLines()) {
+                        Rect r = line.getBoundingBox();
+                        if (r == null) continue;
+                        JSObject o = new JSObject();
+                        o.put("text", line.getText());
+                        o.put("block", b);
+                        o.put("x", r.left);
+                        o.put("y", r.top);
+                        o.put("w", r.width());
+                        o.put("h", r.height());
+                        lines.put(o);
+                    }
+                    b++;
+                }
+                JSObject out = new JSObject();
+                out.put("width", w);
+                out.put("height", h);
+                out.put("lines", lines);
+                call.resolve(out);
+            })
+            .addOnFailureListener(e -> call.reject("Text recognition failed: " + e.getMessage(), e));
     }
 
     private void resolve(PluginCall call, boolean granted) {

@@ -1,3 +1,4 @@
+import { useBlobUrl } from "@/lib/field/use-blob-url";
 import { carpetLayout, roomFlooring } from "@/lib/field/materials";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -30,7 +31,17 @@ import {
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
 
-export type EditorMode = "select" | "draw" | "door" | "window" | "opening" | "stairs";
+export type EditorMode =
+  | "select"
+  | "draw"
+  | "door"
+  | "window"
+  | "opening"
+  | "stairs"
+  /** Drag moves the trace background. */
+  | "trace"
+  /** Tap two points to calibrate the trace scale. */
+  | "calibrate";
 
 type View = { scale: number; tx: number; ty: number };
 
@@ -41,7 +52,8 @@ type Drag =
   | { kind: "wall"; roomId: string; index: number; start: Pt; points: Pt[] }
   | { kind: "draw"; start: Pt; end: Pt }
   | { kind: "stairs"; id: string; start: Pt; x: number; y: number }
-  | { kind: "pinch"; d0: number; mid0: Pt; view: View };
+  | { kind: "pinch"; d0: number; mid0: Pt; view: View }
+  | { kind: "trace"; start: Pt; x: number; y: number };
 
 const HANDLE_PX = 22;
 
@@ -52,6 +64,7 @@ export function PlanEditor({
   onWallTap,
   onPhotoTap,
   onOpeningTap,
+  onCalibrate,
   fitNonce,
   drawName,
 }: {
@@ -62,6 +75,8 @@ export function PlanEditor({
   onPhotoTap: (roomId: string, photoId: string) => void;
   /** Tap on a door / window / doorway. */
   onOpeningTap?: (roomId: string, openingId: string) => void;
+  /** Two calibration points picked (plan units). */
+  onCalibrate?: (a: Pt, b: Pt) => void;
   fitNonce: number;
   drawName?: string | null;
 }) {
@@ -82,6 +97,24 @@ export function PlanEditor({
   const selectStairs = useField((s) => s.selectStairs);
   const addStairs = useField((s) => s.addStairs);
   const currentLevelId = useField((s) => s.currentLevelId);
+  const change = useField((s) => s.change);
+  const traceLevelId = currentLevelId ?? property.levels[0]?.id;
+  const trace = property.levels.find((l) => l.id === traceLevelId)?.trace;
+  const traceUrl = useBlobUrl(trace?.imageId);
+  const [calPts, setCalPts] = useState<Pt[]>([]);
+  useEffect(() => {
+    if (mode !== "calibrate") setCalPts([]);
+  }, [mode]);
+  const setTracePos = (x: number, y: number, commit: boolean) => {
+    const fn = (prop: FieldProperty) => ({
+      ...prop,
+      levels: prop.levels.map((l) =>
+        l.id === traceLevelId && l.trace ? { ...l, trace: { ...l.trace, x, y } } : l,
+      ),
+    });
+    if (commit) change(fn);
+    else preview(fn);
+  };
   const step = gridStep(property.units);
   const unitPx = property.units === "ft" ? 1 : 3.2808;
 
@@ -160,6 +193,19 @@ export function PlanEditor({
       ? property.rooms.find((r) => r.id === target.dataset.room)
       : undefined;
 
+    if (mode === "calibrate") {
+      const next = [...calPts, p];
+      if (next.length >= 2) {
+        setCalPts([]);
+        onCalibrate?.(next[0], next[1]);
+      } else setCalPts(next);
+      return;
+    }
+    if (mode === "trace" && trace && !trace.locked) {
+      beginDrag();
+      setDrag({ kind: "trace", start: p, x: trace.x, y: trace.y });
+      return;
+    }
     if (mode === "draw") {
       const s = { x: snap(p.x, step), y: snap(p.y, step) };
       setDrag({ kind: "draw", start: s, end: s });
@@ -295,6 +341,10 @@ export function PlanEditor({
       return;
     }
     const p = toPlan(e);
+    if (drag.kind === "trace") {
+      setTracePos(drag.x + p.x - drag.start.x, drag.y + p.y - drag.start.y, false);
+      return;
+    }
     if (drag.kind === "draw") {
       setDrag({ ...drag, end: { x: snap(p.x, step), y: snap(p.y, step) } });
       return;
@@ -362,7 +412,8 @@ export function PlanEditor({
       drag.kind === "room" ||
       drag.kind === "corner" ||
       drag.kind === "wall" ||
-      drag.kind === "stairs"
+      drag.kind === "stairs" ||
+      drag.kind === "trace"
     )
       commitDrag();
     setDrag(null);
@@ -446,6 +497,20 @@ export function PlanEditor({
         </defs>
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.scale})`}>
           {lines}
+          {trace && !trace.hidden && traceUrl && (
+            <image
+              href={traceUrl}
+              x={trace.x}
+              y={trace.y}
+              width={trace.w}
+              height={trace.w * trace.aspect}
+              opacity={trace.opacity}
+              preserveAspectRatio="none"
+              transform={`rotate(${trace.rot} ${trace.x} ${trace.y})`}
+              pointerEvents="none"
+              style={mode === "trace" ? { outline: "2px dashed #b4561d" } : undefined}
+            />
+          )}
           {property.rooms.map((room) => {
             const d = room.points.map((q, i) => `${i ? "L" : "M"}${q.x} ${q.y}`).join(" ") + " Z";
             const isSel = room.id === selectedRoomId;
@@ -734,6 +799,9 @@ export function PlanEditor({
               strokeDasharray={`${px(6)} ${px(4)}`}
             />
           )}
+          {calPts.map((q, i) => (
+            <circle key={i} cx={q.x} cy={q.y} r={px(9)} fill="#b4561d" stroke="#fff" strokeWidth={px(3)} />
+          ))}
           {/* Big invisible tap targets so doors / windows can be picked with a thumb. */}
           {property.openings.map((o) => {
             const room = property.rooms.find((r) => r.id === o.roomId);

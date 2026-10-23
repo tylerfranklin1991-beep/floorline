@@ -142,3 +142,51 @@ function posterCanvas(src: HTMLVideoElement | null, w: number, h: number): strin
   ctx.fill();
   return c.toDataURL("image/jpeg", 0.7);
 }
+
+/** System file picker as a promise (resolves null if nothing chosen). */
+export function pickFile(accept: string, camera = false): Promise<File | null> {
+  return new Promise((resolve) => {
+    const i = document.createElement("input");
+    i.type = "file";
+    i.accept = accept;
+    if (camera) i.setAttribute("capture", "environment");
+    i.onchange = () => resolve(i.files?.[0] ?? null);
+    i.addEventListener("cancel", () => resolve(null));
+    i.click();
+  });
+}
+
+/** A photo from the camera or gallery: native Camera plugin, file picker fallback. */
+export async function pickImage(source: "camera" | "gallery"): Promise<Blob | null> {
+  try {
+    const b = await nativePhoto(source);
+    if (b !== "unsupported") return b;
+  } catch {
+    /* fall through to the picker */
+  }
+  return pickFile("image/*", source === "camera");
+}
+
+/** Decode + downscale an image to a JPEG (max edge), returning its size. */
+export async function scaleImage(
+  blob: Blob,
+  maxEdge = 1600,
+): Promise<{ blob: Blob; w: number; h: number; img: HTMLCanvasElement }> {
+  const url = URL.createObjectURL(blob);
+  try {
+    const im = new Image();
+    im.src = url;
+    await im.decode();
+    const k = Math.min(1, maxEdge / Math.max(im.naturalWidth, im.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(im.naturalWidth * k));
+    c.height = Math.max(1, Math.round(im.naturalHeight * k));
+    c.getContext("2d")!.drawImage(im, 0, 0, c.width, c.height);
+    const out = await new Promise<Blob>((res, rej) =>
+      c.toBlob((b) => (b ? res(b) : rej(new Error("encode"))), "image/jpeg", 0.85),
+    );
+    return { blob: out, w: c.width, h: c.height, img: c };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

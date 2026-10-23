@@ -22,6 +22,7 @@ import {
   PanelTop,
   RectangleVertical,
   MapPin,
+  Camera,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -55,6 +56,7 @@ import {
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
 import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
+import { CalibrateSheet, PhotoShape, SketchImport, TracePanel } from "./sketch-tools";
 import { installBackHandler, useBackClose } from "@/lib/field/back";
 import { formatGeo, mapsUrl } from "@/lib/field/media";
 import { MaterialsScreen } from "./materials-screen";
@@ -258,6 +260,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [collapsed, setCollapsed] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
+  const [sketchOpen, setSketchOpen] = useState(false);
+  const [shapeOpen, setShapeOpen] = useState<string | null>(null);
+  const [cal, setCal] = useState<{ a: Pt; b: Pt } | null>(null);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
 
   // Android back: close the top-most thing first (registration order = stacking order).
@@ -272,6 +278,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   useBackClose(menu, () => setMenu(false));
   useBackClose(Boolean(capture), () => setCapture(null));
   useBackClose(Boolean(photo), () => setPhoto(null));
+  useBackClose(traceOpen, () => {
+    setTraceOpen(false);
+    setMode("select");
+  });
 
   useEffect(() => setCollapsed(false), [selectedRoomId, selectedStairsId]);
 
@@ -384,6 +394,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     window: "Tap a wall to place a window",
     opening: "Tap a wall to place a doorway",
     stairs: "Tap where the stairs go",
+    trace: "Drag to move the background",
+    calibrate: "Tap two points on the background you know the distance between",
   };
 
   return (
@@ -417,7 +429,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         </IconBtn>
       </header>
 
-      <LevelBar property={full} levelId={levelId} />
+      <LevelBar property={full} levelId={levelId} onTrace={() => setTraceOpen(true)} />
 
       <AreaBar
         property={full}
@@ -438,6 +450,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             setFocusWall(wall);
           }}
           onOpeningTap={() => setFocusWall(null)}
+          onCalibrate={(a, b) => {
+            setMode("select");
+            setCal({ a, b });
+          }}
           onPhotoTap={(roomId, photoId) => setPhoto({ roomId, photoId })}
         />
         {property.rooms.length === 0 && mode === "select" && (
@@ -460,6 +476,20 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           </div>
         )}
 
+        {traceOpen && !((stairs || room) && mode === "select") && (
+          <div className="absolute inset-x-0 bottom-0 z-20 max-h-[60%] overflow-y-auto rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]">
+            <TracePanel
+              property={full}
+              levelId={levelId}
+              mode={mode}
+              setMode={setMode}
+              onClose={() => {
+                setTraceOpen(false);
+                if (mode === "trace" || mode === "calibrate") setMode("select");
+              }}
+            />
+          </div>
+        )}
         {(stairs || room) && mode === "select" && (
           <div
             className="absolute inset-x-0 bottom-0 z-20 flex max-h-[68%] flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]"
@@ -559,6 +589,12 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               setDrawName(name);
             } else if (how === "typed" && size) {
               void placeRoom(name, size.points ?? rectPoints(0, 0, size.w, size.h), "typed");
+            } else if (how === "sketch") {
+              setSketchOpen(true);
+            } else if (how === "photoshape") {
+              setShapeOpen(name);
+            } else if (how === "trace") {
+              setTraceOpen(true);
             } else if (how === "ar" || how === "walk" || how === "walkmode") {
               setCapture({ kind: how, name });
             }
@@ -581,6 +617,36 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           </div>
         </Sheet>
       )}
+
+      {sketchOpen && (
+        <SketchImport
+          property={full}
+          levelId={levelId}
+          onClose={() => setSketchOpen(false)}
+          onTraceInstead={() => {
+            setTraceOpen(true);
+            setFitNonce((n) => n + 1);
+          }}
+        />
+      )}
+      {shapeOpen && (
+        <PhotoShape
+          property={full}
+          defaultName={shapeOpen}
+          onClose={() => setShapeOpen(null)}
+          onDone={(name, pts, photos) => {
+            setShapeOpen(null);
+            const o = nextRoomOrigin(property.rooms);
+            const b = bbox(pts);
+            const r = newRoom(name, translate(pts, o.x - b.minX, o.y - b.minY), "typed");
+            r.photos.push(...photos);
+            addRoom(r);
+            setFitNonce((n) => n + 1);
+            toast.success(`${r.name} added with ${pts.length} walls`);
+          }}
+        />
+      )}
+      {cal && <CalibrateSheet property={full} levelId={levelId} a={cal.a} b={cal.b} onClose={() => setCal(null)} />}
 
       {jobOpen && <JobSettingsSheet property={full} onClose={() => setJobOpen(false)} />}
 
@@ -700,7 +766,15 @@ function AreaBar({
   );
 }
 
-function LevelBar({ property, levelId }: { property: FieldProperty; levelId: string }) {
+function LevelBar({
+  property,
+  levelId,
+  onTrace,
+}: {
+  property: FieldProperty;
+  levelId: string;
+  onTrace: () => void;
+}) {
   const setLevel = useField((s) => s.setLevel);
   const addLevel = useField((s) => s.addLevel);
   const renameLevel = useField((s) => s.renameLevel);
@@ -745,6 +819,13 @@ function LevelBar({ property, levelId }: { property: FieldProperty; levelId: str
         className="flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-black/30 px-4 text-base font-semibold"
       >
         <Plus className="size-4" /> Level
+      </button>
+      <button
+        type="button"
+        onClick={onTrace}
+        className={`ml-auto flex h-12 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-4 text-base font-semibold ${property.levels.find((l) => l.id === levelId)?.trace ? "bg-[#f3dcc3] text-[#8a3b12]" : "bg-black/5"}`}
+      >
+        <ImageIcon className="size-4" /> Trace
       </button>
       {editing && current && (
         <Sheet title="Floor / level" onClose={() => setEditing(false)}>
@@ -866,7 +947,7 @@ function AddRoomSheet({
   defaultName: string;
   onClose: () => void;
   onPick: (
-    how: "ar" | "walk" | "walkmode" | "draw" | "typed",
+    how: "ar" | "walk" | "walkmode" | "draw" | "typed" | "sketch" | "photoshape" | "trace",
     name: string,
     size?: { w: number; h: number; points?: Pt[] },
   ) => void;
@@ -908,6 +989,24 @@ function AddRoomSheet({
         <QuickSize units={units} name={n} onPick={onPick} />
         <div className="space-y-2">
           <div className="text-base font-semibold">Or capture / draw the shape</div>
+          <MethodBtn
+            icon={<FileText />}
+            title="Auto from sketch"
+            body="Photo of your hand sketch (12'8 x 13'9, M.B.R.…). Rooms are read on the phone; you review before adding."
+            onClick={() => onPick("sketch", n)}
+          />
+          <MethodBtn
+            icon={<Camera />}
+            title="Room shape from photos"
+            body="Tap the floor corners on 1+ photos to get the shape and wall count, then type each wall length."
+            onClick={() => onPick("photoshape", n)}
+          />
+          <MethodBtn
+            icon={<ImageIcon />}
+            title="Trace over a sketch / photo"
+            body="Put an image behind this floor, calibrate it, and draw on top."
+            onClick={() => onPick("trace", n)}
+          />
           <MethodBtn
             icon={<ScanLine />}
             title="AR corners"
