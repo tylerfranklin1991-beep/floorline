@@ -23,6 +23,8 @@ import {
   RectangleVertical,
   MapPin,
   Camera,
+  MessageSquarePlus,
+  Crown,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -56,6 +58,9 @@ import {
 import { loadPhotoBlob, savePhotoBlob, type PreparedPhoto } from "@/lib/field/photos";
 import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store";
 import { ArCapture } from "./ar-capture";
+import { FeedbackSheet, ProSheet } from "./feedback-sheet";
+import { canCreateJob, usePro, entitled, billingOn, restorePro } from "@/lib/field/pro";
+import { maybeAskForReview } from "@/lib/field/feedback";
 import { CalibrateSheet, PhotoShape, SketchImport, TracePanel } from "./sketch-tools";
 import { installBackHandler, useBackClose } from "@/lib/field/back";
 import { formatGeo, mapsUrl } from "@/lib/field/media";
@@ -79,6 +84,13 @@ setOnSaveError(() => {
 });
 
 export function FieldApp() {
+  useEffect(() => {
+    // Picks up Pro bought or redeemed (tester promo code) in the Play Store.
+    const check = () => void restorePro().catch(() => {});
+    check();
+    document.addEventListener("visibilitychange", check);
+    return () => document.removeEventListener("visibilitychange", check);
+  }, []);
   const property = useCurrentProperty();
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
@@ -111,6 +123,10 @@ function HomeScreen() {
   const [name, setName] = useState("");
   const [units, setUnits] = useState<Units>("ft");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [feedback, setFeedback] = useState(false);
+  const [pro, setPro] = useState<string | null>(null);
+  const owned = usePro((s) => s.owned);
+  const isPro = entitled(owned);
 
   return (
     <div
@@ -118,7 +134,22 @@ function HomeScreen() {
       style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
     >
       <header>
-        <h1 className="text-3xl font-bold">Floorline</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="flex-1 text-3xl font-bold">Floorline</h1>
+          {billingOn() && !isPro && (
+            <button type="button" onClick={() => setPro("")} className="flex h-11 items-center gap-1 rounded-full bg-[#f3dcc3] px-3 font-semibold text-[#8a3b12]">
+              <Crown className="size-4" /> Pro
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Send feedback or suggest a feature"
+            onClick={() => setFeedback(true)}
+            className="flex h-11 items-center gap-1 rounded-full bg-black/5 px-3 text-base"
+          >
+            <MessageSquarePlus className="size-4" /> Feedback
+          </button>
+        </div>
         <p className="text-lg text-black/60">
           Walk a property, get a clean floor plan you can measure.
         </p>
@@ -149,7 +180,11 @@ function HomeScreen() {
         </div>
         <button
           type="button"
-          onClick={() => createProperty(name || `Property ${properties.length + 1}`, units)}
+          onClick={() =>
+            canCreateJob(properties.length, isPro)
+              ? createProperty(name || `Property ${properties.length + 1}`, units)
+              : setPro(`The free version keeps ${properties.length} jobs. Delete one or go Pro for unlimited.`)
+          }
           className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-[#b4561d] text-xl font-bold text-white"
         >
           <Plus /> Start property
@@ -219,6 +254,8 @@ function HomeScreen() {
           </div>
         ))}
       </section>
+      {feedback && <FeedbackSheet onClose={() => setFeedback(false)} />}
+      {pro !== null && <ProSheet reason={pro || undefined} onClose={() => setPro(null)} />}
     </div>
   );
 }
@@ -261,6 +298,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState<string | null>(null);
   const [cal, setCal] = useState<{ a: Pt; b: Pt } | null>(null);
@@ -691,7 +729,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       )}
 
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
-      {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
+      {menu && (
+        <ExportSheet property={full} onClose={() => setMenu(false)} onFeedback={() => setFeedbackOpen(true)} />
+      )}
+      {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
     </div>
   );
@@ -1253,11 +1294,22 @@ function PhotoViewer({
   );
 }
 
-function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: () => void }) {
+let exportsDone = 0;
+function ExportSheet({
+  property,
+  onClose,
+  onFeedback,
+}: {
+  property: FieldProperty;
+  onClose: () => void;
+  onFeedback: () => void;
+}) {
   const run = (fn: () => Promise<unknown> | void, ok: string) => async () => {
     try {
       await fn();
-      toast.success(ok);
+      exportsDone++;
+      toast.success(ok, { action: { label: "Suggest a feature", onClick: onFeedback } });
+      void maybeAskForReview(exportsDone);
     } catch (err) {
       if ((err as { name?: string })?.name !== "AbortError") toast.error("Export failed");
     }
@@ -1295,6 +1347,15 @@ function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: 
           title="JSON backup"
           body="Re-import later or on another device."
           onClick={run(() => exportJson(property), "JSON saved")}
+        />
+        <MethodBtn
+          icon={<MessageSquarePlus />}
+          title="Send feedback / Suggest a feature"
+          body="Tell us what's missing or broken."
+          onClick={() => {
+            onClose();
+            onFeedback();
+          }}
         />
       </div>
     </Sheet>

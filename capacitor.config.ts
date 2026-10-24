@@ -1,13 +1,12 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
-  appId: "com.tylerfranklin.floorline.beta",
-  appName: "Floorline Beta",
+  appId: "com.tylerfranklin.floorline",
+  appName: "Floorline",
   // Static SPA build from `npm run build:android` (vite.config.android.ts).
   webDir: "dist/client",
   android: {
-    // Debug-friendly beta: lets you inspect the WebView via chrome://inspect.
-    webContentsDebuggingEnabled: true,
+    // WebView debugging is on for debug builds only (Capacitor default).
   },
 };
 

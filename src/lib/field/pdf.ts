@@ -10,6 +10,7 @@ import {
 import { area, formatArea, formatLength, levelView, type FieldProperty } from "./model";
 import { loadPhotoBlob } from "./photos";
 import { jobSettings } from "./job";
+import { watermarkPdf } from "./pro";
 import { orderLines, roomRows } from "./takeoff";
 import { planFrame, renderPlanSvg } from "./render";
 
@@ -67,7 +68,7 @@ async function blobToJpeg(b: Blob): Promise<{ url: string; w: number; h: number 
   return { url: c.toDataURL("image/jpeg", 0.82), w: c.width, h: c.height };
 }
 
-export type PdfOptions = { seams?: boolean };
+export type PdfOptions = { seams?: boolean; watermark?: boolean };
 
 export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Promise<Blob> {
   const doc = new jsPDF({ unit: "in", format: "letter" });
@@ -221,6 +222,15 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
         });
         y += imgH + 0.4;
       }
+    }
+  }
+  if (opts.watermark ?? watermarkPdf()) {
+    for (let i = 1; i <= doc.getNumberOfPages(); i++) {
+      doc.setPage(i);
+      doc.setFontSize(9);
+      doc.setTextColor(150);
+      doc.text("Made with Floorline Free · floorline.app", PW / 2, PH - 0.25, { align: "center" });
+      doc.setTextColor(0);
     }
   }
   return doc.output("blob");

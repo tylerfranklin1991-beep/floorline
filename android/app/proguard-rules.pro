@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor: plugins are found by reflection via annotations.
+-keep class com.getcapacitor.** { *; }
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keepclassmembers class * { @com.getcapacitor.PluginMethod public *; }
+-keepattributes *Annotation*,JavascriptInterface,Signature,InnerClasses,EnclosingMethod
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-keep class com.tylerfranklin.floorline.** { *; }
+-dontwarn com.google.mlkit.**

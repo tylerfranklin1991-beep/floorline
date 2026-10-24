@@ -82,6 +82,71 @@ public class FloorlineNativePlugin extends Plugin {
     }
 
     /**
+     * Feedback: opens the user's email app (ACTION_SEND, so a screenshot can be
+     * attached) pre-filled with the support address. Nothing is sent by the app.
+     */
+    @PluginMethod
+    public void sendEmail(PluginCall call) {
+        try {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.putExtra(Intent.EXTRA_EMAIL, new String[] { call.getString("to", "") });
+            send.putExtra(Intent.EXTRA_SUBJECT, call.getString("subject", "Floorline feedback"));
+            send.putExtra(Intent.EXTRA_TEXT, call.getString("body", ""));
+            String data = call.getString("base64");
+            if (data != null) {
+                File dir = new File(getContext().getCacheDir(), "exports");
+                if (!dir.exists() && !dir.mkdirs()) throw new Exception("Can't create cache dir");
+                File out = new File(dir, "feedback-screenshot.jpg");
+                try (FileOutputStream fos = new FileOutputStream(out)) {
+                    fos.write(Base64.decode(data, Base64.DEFAULT));
+                }
+                Uri uri = FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", out);
+                send.setType("image/jpeg");
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } else {
+                send.setType("message/rfc822");
+            }
+            Intent chooser = Intent.createChooser(send, "Send feedback");
+            chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getActivity().startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Couldn't open email: " + e.getMessage(), e);
+        }
+    }
+
+    /** Opens a link in the system browser (window.open is a no-op in the WebView). */
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(call.getString("url", "")));
+            view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(view);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Couldn't open link", e);
+        }
+    }
+
+    /**
+     * Google Play In-App Review. Google decides whether the card shows (quota);
+     * resolves either way and never reveals whether the user rated.
+     */
+    @PluginMethod
+    public void requestReview(PluginCall call) {
+        com.google.android.play.core.review.ReviewManager mgr =
+            com.google.android.play.core.review.ReviewManagerFactory.create(getContext());
+        mgr.requestReviewFlow().addOnCompleteListener(t -> {
+            if (!t.isSuccessful()) {
+                call.resolve();
+                return;
+            }
+            mgr.launchReviewFlow(getActivity(), t.getResult()).addOnCompleteListener(x -> call.resolve());
+        });
+    }
+
+    /**
      * On-device OCR (Google ML Kit Text Recognition v2, bundled Latin model:
      * no network, no API key). Input: base64 JPEG/PNG. Output: text lines
      * with pixel bounding boxes, plus the image size.

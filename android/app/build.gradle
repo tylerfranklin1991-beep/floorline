@@ -1,14 +1,20 @@
 apply plugin: 'com.android.application'
 
+// Release signing is read from a file OUTSIDE the repo (never committed).
+// Default: /home/box/floorline-release/keystore.properties, override with FLOORLINE_KEYSTORE_PROPS.
+def releasePropsFile = file(System.getenv("FLOORLINE_KEYSTORE_PROPS") ?: "/home/box/floorline-release/keystore.properties")
+def releaseProps = new Properties()
+if (releasePropsFile.exists()) { releasePropsFile.withInputStream { releaseProps.load(it) } }
+
 android {
     namespace "com.tylerfranklin.floorline.beta"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.tylerfranklin.floorline.beta"
+        applicationId "com.tylerfranklin.floorline"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11
-        versionName "0.1.0-beta.8"
+        versionCode 12
+        versionName "0.9.0-beta.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +22,31 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    buildTypes {
+    signingConfigs {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseProps["storeFile"]) {
+                storeFile file(releaseProps["storeFile"])
+                storePassword releaseProps["storePassword"]
+                keyAlias releaseProps["keyAlias"]
+                keyPassword releaseProps["keyPassword"]
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // Side-loaded field beta keeps its own id/name so it installs next to the Play build.
+            applicationIdSuffix ".beta"
+            versionNameSuffix "-debug"
+            resValue "string", "app_name", "Floorline Beta"
+            resValue "string", "title_activity_main", "Floorline Beta"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            resValue "string", "app_name", "Floorline"
+            resValue "string", "title_activity_main", "Floorline"
+            if (releaseProps["storeFile"]) signingConfig signingConfigs.release
         }
     }
 }
@@ -38,6 +65,10 @@ dependencies {
     implementation project(':capacitor-android')
     // On-device handwriting/print OCR for "Auto from sketch" (bundled model, works offline).
     implementation 'com.google.mlkit:text-recognition:16.0.1'
+    // Pro unlock (off by default in the web layer, see src/lib/field/pro.ts).
+    implementation 'com.android.billingclient:billing:9.1.0'
+    // Optional Play In-App Review prompt.
+    implementation 'com.google.android.play:review:2.0.2'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

@@ -4,7 +4,20 @@ type FloorlineNative = {
   shareFile: (o: { name: string; mime: string; base64: string }) => Promise<void>;
   ensure: () => Promise<{ granted: boolean }>;
   recognizeText: (o: { base64: string }) => Promise<OcrResult>;
+  sendEmail: (o: { to: string; subject: string; body: string; base64?: string }) => Promise<void>;
+  openUrl: (o: { url: string }) => Promise<void>;
+  requestReview: () => Promise<void>;
 };
+
+export type BillingProduct = { id: string; type: "subs" | "inapp" };
+type FloorlineBilling = {
+  getProducts: (o: { products: BillingProduct[] }) => Promise<{
+    items: { id: string; title: string; price: string }[];
+  }>;
+  buy: (o: BillingProduct) => Promise<{ ok: boolean; cancelled?: boolean }>;
+  owned: () => Promise<{ owned: string[] }>;
+};
+export const Billing = registerPlugin<FloorlineBilling>("FloorlineBilling");
 
 export type OcrLine = { text: string; block: number; x: number; y: number; w: number; h: number };
 export type OcrResult = { width: number; height: number; lines: OcrLine[] };
@@ -25,7 +38,7 @@ export function isNativeApp(): boolean {
   }
 }
 
-async function toBase64(blob: Blob): Promise<string> {
+export async function toBase64(blob: Blob): Promise<string> {
   const url: string = await new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result));
