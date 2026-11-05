@@ -1,5 +1,5 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { Toaster } from "sonner";
@@ -20,6 +20,28 @@ function PointerUnlock() {
   return null;
 }
 
+/**
+ * Render the routed app only after mount. The SPA/APK shell is prerendered
+ * without the matched route, so hydrating the route straight away caused
+ * React error #418 (hydration mismatch). Both the shell and the first client
+ * render now emit nothing here, then the app renders client-side.
+ */
+function ClientOnly({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  return mounted ? <>{children}</> : null;
+}
+
+/** Register the offline service worker in production builds only. */
+function OfflineCache() {
+  useEffect(() => {
+    // The Android app ships its assets inside the APK, so it needs no SW.
+    if (import.meta.env.DEV || import.meta.env.VITE_NATIVE_APP || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }, []);
+  return null;
+}
+
 export const Route = createRootRoute({
   head: () => ({
     meta: [
@@ -29,7 +51,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f3efe4" },
       {
         name: "description",
-        content: "Turn photos and video of a space into a measured floor plan.",
+        content: "Turn a walkthrough into a measured floor plan.",
       },
     ],
     links: [
@@ -53,8 +75,11 @@ export const Route = createRootRoute({
       <body>
         <PreviewHostBridge />
         <PointerUnlock />
+        <OfflineCache />
         <AuthProvider>
-          <Outlet />
+          <ClientOnly>
+            <Outlet />
+          </ClientOnly>
           <Toaster
             theme="light"
             position="bottom-center"

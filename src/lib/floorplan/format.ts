@@ -12,7 +12,7 @@ export function formatLength(n: number, units: Units): string {
   const sign = n < 0 ? "-" : "";
   const abs = Math.abs(n);
   const feet = Math.floor(abs + 1e-6);
-  let inches = Math.round((abs - feet) * 12);
+  const inches = Math.round((abs - feet) * 12);
   if (inches === 12) return `${sign}${feet + 1}'`;
   if (inches === 0) return `${sign}${feet}'`;
   return `${sign}${feet}'-${inches}"`;
