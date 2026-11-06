@@ -1,5 +1,6 @@
 import { useBlobUrl } from "@/lib/field/use-blob-url";
-import { carpetLayout, roomFlooring } from "@/lib/field/materials";
+import { carpetLayout, listedArea, roomFlooring } from "@/lib/field/materials";
+import { closetPlanLabel } from "@/lib/field/arrow-draw";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   area,
@@ -10,6 +11,7 @@ import {
   formatArea,
   formatLength,
   gridStep,
+  isRectilinear,
   magnetOffset,
   moveCorner,
   moveWall,
@@ -57,6 +59,15 @@ type Drag =
 
 const HANDLE_PX = 22;
 
+function labelRotation(e: { a: Pt; b: Pt; horizontal: boolean }): number {
+  const axis = Math.abs(e.a.x - e.b.x) < 1e-3 || Math.abs(e.a.y - e.b.y) < 1e-3;
+  if (axis) return e.horizontal ? 0 : -90;
+  let deg = (Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x) * 180) / Math.PI;
+  if (deg > 90) deg -= 180;
+  if (deg < -90) deg += 180;
+  return deg;
+}
+
 export function PlanEditor({
   property,
   mode,
@@ -65,8 +76,12 @@ export function PlanEditor({
   onPhotoTap,
   onOpeningTap,
   onCalibrate,
+  onRoomTap,
   fitNonce,
   drawName,
+  focusWall,
+  draft,
+  draftOrigin,
 }: {
   property: FieldProperty;
   mode: EditorMode;
@@ -77,8 +92,21 @@ export function PlanEditor({
   onOpeningTap?: (roomId: string, openingId: string) => void;
   /** Two calibration points picked (plan units). */
   onCalibrate?: (a: Pt, b: Pt) => void;
+  /** Tap the room interior (not a wall). */
+  onRoomTap?: (roomId: string | null) => void;
   fitNonce: number;
   drawName?: string | null;
+  /** Wall the laser will fill. */
+  focusWall?: number | null;
+  /** In-progress arrow drawing, in local coordinates. */
+  draft?: {
+    points: Pt[];
+    closets: Pt[][];
+    openings: { a: Pt; b: Pt }[];
+    openCloset: Pt[] | null;
+    preview: Pt | null;
+  } | null;
+  draftOrigin?: Pt;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 360, h: 480 });
@@ -295,11 +323,13 @@ export function PlanEditor({
     const hit = roomAt(p);
     if (hit) {
       select(hit.id);
+      onRoomTap?.(hit.id);
       beginDrag();
       setDrag({ kind: "room", roomId: hit.id, start: p, points: hit.points, moved: false });
       return;
     }
     select(null);
+    onRoomTap?.(null);
     selectStairs(null);
     setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view });
   };
@@ -680,16 +710,30 @@ export function PlanEditor({
                 >
                   {room.name}
                 </text>
-                <text
-                  x={c.x}
-                  y={c.y + fs * 1.15}
-                  fontSize={fs * 0.75}
-                  textAnchor="middle"
-                  fill="#5c574d"
-                  pointerEvents="none"
-                >
-                  {formatArea(area(room.points), property.units)}
-                </text>
+                  <text
+                    x={c.x}
+                    y={c.y + fs * 1.15}
+                    fontSize={fs * (room.closet ? 0.62 : 0.75)}
+                    textAnchor="middle"
+                    fill="#5c574d"
+                    pointerEvents="none"
+                  >
+                    {room.closet
+                      ? closetPlanLabel(
+                          property.rooms.find((r) => r.id === room.closet?.parentId)?.name ?? "Room",
+                          room.name,
+                          room.points,
+                          property.units,
+                        )
+                      : formatArea(
+                          property.rooms.some(
+                            (c) => c.closet?.parentId === room.id && c.closet.includeInParent,
+                          )
+                            ? listedArea(property, room)
+                            : area(room.points),
+                          property.units,
+                        )}
+                  </text>
                 {room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
                     key={ph.id}
@@ -720,7 +764,7 @@ export function PlanEditor({
                       data-h="label"
                       data-room={room.id}
                       data-i={e.index}
-                      transform={`translate(${tx} ${ty}) rotate(${e.horizontal ? 0 : -90})`}
+                      transform={`translate(${tx} ${ty}) rotate(${labelRotation(e)})`}
                       style={{ cursor: "pointer" }}
                     >
                       <rect
@@ -748,7 +792,66 @@ export function PlanEditor({
               </g>
             );
           })}
-          {selected && mode === "select" && (
+          {selected && focusWall != null && edges(selected.points)[focusWall] && (
+            <line
+              x1={edges(selected.points)[focusWall].a.x}
+              y1={edges(selected.points)[focusWall].a.y}
+              x2={edges(selected.points)[focusWall].b.x}
+              y2={edges(selected.points)[focusWall].b.y}
+              stroke="#b4561d"
+              strokeWidth={px(8)}
+              strokeLinecap="round"
+              pointerEvents="none"
+            />
+          )}
+          {draft && draftOrigin && (
+            <g transform={`translate(${draftOrigin.x} ${draftOrigin.y})`} pointerEvents="none">
+              {draft.points.length > 1 && (
+                <polyline
+                  points={draft.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="none"
+                  stroke="#b4561d"
+                  strokeWidth={px(3)}
+                  strokeDasharray={`${px(7)} ${px(4)}`}
+                />
+              )}
+              {(draft.openCloset ?? draft.points).length > 0 && draft.preview && (
+                <line
+                  x1={(draft.openCloset ?? draft.points).at(-1)!.x}
+                  y1={(draft.openCloset ?? draft.points).at(-1)!.y}
+                  x2={draft.preview.x}
+                  y2={draft.preview.y}
+                  stroke="#b4561d"
+                  strokeWidth={px(2)}
+                  markerEnd="url(#fl-arrow)"
+                />
+              )}
+              {draft.points.map((p, i) => (
+                <circle key={`d${i}`} cx={p.x} cy={p.y} r={px(4.5)} fill="#b4561d" />
+              ))}
+              {draft.closets.map((pts, i) => (
+                <polygon
+                  key={`c${i}`}
+                  points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="#efe2c6"
+                  stroke="#8a3b12"
+                  strokeWidth={px(2)}
+                />
+              ))}
+              {draft.openings.map((seg, i) => (
+                <line
+                  key={`o${i}`}
+                  x1={seg.a.x}
+                  y1={seg.a.y}
+                  x2={seg.b.x}
+                  y2={seg.b.y}
+                  stroke="#f6f2e8"
+                  strokeWidth={px(7)}
+                />
+              ))}
+            </g>
+          )}
+          {selected && mode === "select" && isRectilinear(selected.points) && (
             <g>
               {edges(selected.points).map((e) => (
                 <rect
