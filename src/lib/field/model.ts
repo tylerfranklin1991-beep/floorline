@@ -37,6 +37,11 @@ export interface FieldRoom {
   flooring?: Partial<RoomFlooring>;
   /** Islands, cabinets, hearths (subtract) or bump-outs / closets (add), as simple w × l areas. */
   areas?: RoomArea[];
+  /**
+   * This room is a closet drawn off another room. When `includeInParent` is set,
+   * its area rolls into the parent total; otherwise it is listed on its own.
+   */
+  closet?: { parentId: string; includeInParent: boolean };
 }
 
 export interface RoomArea {
@@ -92,6 +97,8 @@ export interface FieldOpening {
   width: number;
   /** Transition override at this doorway; automatic when missing. */
   transition?: TransitionType;
+  /** Cased opening (trimmed, no door slab). `kind` stays "opening". */
+  cased?: boolean;
 }
 
 export interface FieldProperty {
@@ -572,7 +579,7 @@ export function translate(points: Pt[], dx: number, dy: number): Pt[] {
  */
 export function setWallLength(points: Pt[], index: number, length: number): Pt[] | null {
   const n = points.length;
-  if (!(length > 0) || n < 4) return null;
+  if (!(length > 0) || n < 3) return null;
   const a = points[index];
   const b = points[(index + 1) % n];
   const current = Math.hypot(b.x - a.x, b.y - a.y);
@@ -842,7 +849,8 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
   for (const r of v.rooms) {
     if (!r || typeof r.id !== "string" || !Array.isArray(r.points)) continue;
     const points = r.points.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
-    if (points.length < 4) continue;
+    if (points.length < 3) continue;
+    const closetRaw = r.closet as { parentId?: unknown; includeInParent?: unknown } | undefined;
     rooms.push({
       id: r.id,
       name: typeof r.name === "string" ? r.name : "Room",
@@ -870,16 +878,33 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
               })),
           }
         : {}),
+      ...(closetRaw && typeof closetRaw.parentId === "string"
+        ? {
+            closet: {
+              parentId: closetRaw.parentId,
+              includeInParent: closetRaw.includeInParent !== false,
+            },
+          }
+        : {}),
     });
   }
   const ids = new Set(rooms.map((r) => r.id));
+  for (const room of rooms) {
+    if (room.closet && (room.closet.parentId === room.id || !ids.has(room.closet.parentId))) {
+      delete room.closet;
+    }
+  }
   return {
     id: v.id,
     name: typeof v.name === "string" ? v.name : "Property",
     address: typeof v.address === "string" ? v.address : "",
     units: v.units === "m" ? "m" : "ft",
     rooms,
-    openings: Array.isArray(v.openings) ? v.openings.filter((o) => o && ids.has(o.roomId)) : [],
+    openings: Array.isArray(v.openings)
+      ? v.openings
+          .filter((o) => o && ids.has(o.roomId))
+          .map((o) => ({ ...o, ...(o.cased === true ? { cased: true } : { cased: undefined }) }))
+      : [],
     levels,
     stairs: Array.isArray(v.stairs)
       ? v.stairs
