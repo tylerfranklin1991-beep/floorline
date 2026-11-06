@@ -253,7 +253,7 @@ export function RoomPanel({
             key={o.id}
             className={`flex flex-wrap items-center gap-2 rounded-xl p-2 ${o.id === selectedOpeningId ? "bg-[#f3dcc3] ring-2 ring-[#b4561d]" : "bg-black/[0.03]"}`}
           >
-            <span className="w-20 text-base font-semibold">{OPENING_LABEL[o.kind]}</span>
+            <span className="w-20 text-base font-semibold">{o.cased ? "Cased opening" : OPENING_LABEL[o.kind]}</span>
             <span className="text-sm text-black/50">wall {o.wall + 1}</span>
             <span className="ml-auto text-sm">width</span>
             <LengthInput

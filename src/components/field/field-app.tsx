@@ -32,6 +32,7 @@ import {
   area,
   bbox,
   formatArea,
+  formatLength,
   gridStep,
   levelView,
   nearestWall,
@@ -44,6 +45,7 @@ import {
   ensureClockwise,
   lShapePoints,
   ROOM_PRESETS,
+  setWallLength,
   translate,
   uid,
   type FieldOpening,
@@ -68,6 +70,10 @@ import { RoomPanel } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
+import { ArrowSheet, LaserButton, LaserReadout, LaserSheet, type PlanDraft } from "./laser-controls";
+import { advanceLaserTarget } from "@/lib/field/arrow-draw";
+import { autoReconnect, onDistoReading, useDisto } from "@/lib/field/disto-link";
+import { metersToPlan } from "@/lib/field/disto-protocol";
 
 let lastSaveToast = 0;
 setOnSaveError(() => {
@@ -264,6 +270,20 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [sketchOpen, setSketchOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState<string | null>(null);
   const [cal, setCal] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [laserOpen, setLaserOpen] = useState(false);
+  const [arrowOn, setArrowOn] = useState(false);
+  const [draft, setDraft] = useState<PlanDraft | null>(null);
+  const [laserNote, setLaserNote] = useState<{ label: string; detail: string; reshoot: boolean } | null>(null);
+  const arrowUndoRef = useRef<(() => boolean) | null>(null);
+  const arrowReadRef = useRef<((meters: number) => boolean) | null>(null);
+  const focusRef = useRef<number | null>(null);
+  const levelRef = useRef(levelId);
+  const arrowOnRef = useRef(arrowOn);
+  const lastShot = useRef<{ roomId: string; wall: number; before: Pt[]; after: Pt[] } | null>(null);
+  focusRef.current = focusWall;
+  levelRef.current = levelId;
+  arrowOnRef.current = arrowOn;
+  const disto = useDisto();
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
 
   // Android back: close the top-most thing first (registration order = stacking order).
@@ -282,6 +302,66 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     setTraceOpen(false);
     setMode("select");
   });
+  useBackClose(laserOpen, () => setLaserOpen(false));
+  useBackClose(arrowOn, () => setArrowOn(false));
+
+  useEffect(() => {
+    void autoReconnect();
+  }, []);
+
+  useEffect(() => {
+    return onDistoReading((meters) => {
+      if (arrowOnRef.current && arrowReadRef.current?.(meters)) return;
+      const st = useField.getState();
+      const prop = st.properties.find((p) => p.id === st.currentId);
+      const units = prop?.units ?? "ft";
+      const label = formatLength(metersToPlan(meters, units), units);
+      const roomId = st.selectedRoomId;
+      const wall = focusRef.current;
+      if (!prop || roomId == null || wall == null) {
+        setLaserNote({ label, detail: "Tap a wall, then shoot again.", reshoot: false });
+        return;
+      }
+      const target = prop.rooms.find((r) => r.id === roomId);
+      if (!target) return;
+      const length = metersToPlan(meters, units);
+      const next = setWallLength(target.points, wall, length);
+      if (!next) {
+        setLaserNote({ label, detail: "That length would fold the room.", reshoot: false });
+        return;
+      }
+      lastShot.current = { roomId, wall, before: target.points, after: next };
+      st.updateRoom(roomId, { points: next });
+      const rooms = prop.rooms
+        .filter((r) => r.levelId === (levelRef.current || prop.levels[0]?.id))
+        .map((r) => ({ id: r.id, wallCount: r.points.length }));
+      const adv = advanceLaserTarget(rooms, roomId, wall);
+      if (adv) {
+        st.select(adv.roomId);
+        setFocusWall(adv.wall);
+        setLaserNote({ label, detail: `Wall ${wall + 1} set · next is wall ${adv.wall + 1}`, reshoot: true });
+      } else {
+        setFocusWall(wall);
+        setLaserNote({ label, detail: `Wall ${wall + 1} set · last wall on this floor`, reshoot: true });
+      }
+    });
+  }, []);
+
+  const reshoot = () => {
+    const shot = lastShot.current;
+    if (!shot) return;
+    const st = useField.getState();
+    const prop = st.properties.find((p) => p.id === st.currentId);
+    const target = prop?.rooms.find((r) => r.id === shot.roomId);
+    const same =
+      target &&
+      target.points.length === shot.after.length &&
+      target.points.every((p, i) => p.x === shot.after[i].x && p.y === shot.after[i].y);
+    if (same) st.updateRoom(shot.roomId, { points: shot.before });
+    st.select(shot.roomId);
+    setFocusWall(shot.wall);
+    setLaserNote((n) => (n ? { ...n, detail: "Ready — press DIST to re-shoot.", reshoot: false } : n));
+  };
 
   useEffect(() => setCollapsed(false), [selectedRoomId, selectedStairsId]);
 
@@ -418,7 +498,14 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           }
           className="h-12 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
         />
-        <IconBtn label="Undo" onClick={undo} disabled={!canUndo}>
+        <IconBtn
+          label="Undo"
+          onClick={() => {
+            if (arrowUndoRef.current?.()) return;
+            undo();
+          }}
+          disabled={!canUndo && !arrowOn}
+        >
           <Undo2 />
         </IconBtn>
         <IconBtn label="Redo" onClick={redo} disabled={!canRedo}>
@@ -427,6 +514,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <IconBtn label="Job settings" onClick={() => setJobOpen(true)}>
           <Settings2 />
         </IconBtn>
+        <LaserButton onClick={() => { setArrowOn(false); setLaserOpen((open) => !open); }} />
       </header>
 
       <LevelBar property={full} levelId={levelId} onTrace={() => setTraceOpen(true)} />
@@ -438,6 +526,15 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         onUnits={() => setUnits(property.units === "ft" ? "m" : "ft")}
       />
 
+      <LaserReadout
+        label={
+          laserNote?.label ||
+          (disto.last ? formatLength(metersToPlan(disto.last.meters, property.units), property.units) : disto.status === "connected" ? disto.name || "DISTO" : "Laser")
+        }
+        detail={laserNote?.detail ?? null}
+        onReshoot={laserNote?.reshoot ? reshoot : null}
+      />
+
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <PlanEditor
           property={property}
@@ -445,10 +542,14 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
+          focusWall={focusWall}
+          draft={arrowOn ? draft : null}
+          draftOrigin={nextRoomOrigin(property.rooms)}
           onWallTap={(roomId, wall) => {
             select(roomId);
             setFocusWall(wall);
           }}
+          onRoomTap={() => setFocusWall(null)}
           onOpeningTap={() => setFocusWall(null)}
           onCalibrate={(a, b) => {
             setMode("select");
@@ -547,6 +648,47 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           </div>
         )}
       </div>
+
+      {laserOpen && !arrowOn && (
+        <LaserSheet
+          units={property.units}
+          onClose={() => setLaserOpen(false)}
+          onDraw={() => {
+            setLaserOpen(false);
+            select(null);
+            setFocusWall(null);
+            setArrowOn(true);
+          }}
+        />
+      )}
+      {arrowOn && (
+        <ArrowSheet
+          units={property.units}
+          levelId={levelId}
+          origin={nextRoomOrigin(property.rooms)}
+          defaultName={nextName()}
+          undoRef={arrowUndoRef}
+          readingRef={arrowReadRef}
+          onDraft={setDraft}
+          onCommit={(committed) => {
+            change((p) => ({
+              ...p,
+              rooms: [...p.rooms, committed.room, ...committed.closets],
+              openings: [...p.openings, ...committed.openings],
+            }));
+            select(committed.room.id);
+            setFocusWall(0);
+            const gap = formatLength(committed.closingError, property.units);
+            setLaserNote({
+              label: committed.room.name,
+              detail: `Closed. Gap to the start was ${gap}.`,
+              reshoot: false,
+            });
+            toast.success(`${committed.room.name} closed · gap ${gap}`);
+          }}
+          onClose={() => setArrowOn(false)}
+        />
+      )}
 
       <nav
         className="grid grid-cols-6 gap-1 border-t border-black/10 bg-white px-1 pt-1"
