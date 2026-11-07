@@ -55,6 +55,8 @@ import { setOnSaveError, useCurrentProperty, useField } from "@/lib/field/store"
 import { ArCapture } from "./ar-capture";
 import { ArCoreScan } from "./arcore-scan";
 import { MaterialsScreen } from "./materials-screen";
+import { QuoteSheet } from "./quote-sheet";
+import { SeamDock } from "./seam-dock";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
@@ -246,6 +248,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [menu, setMenu] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
   const [showMaterials, setShowMaterials] = useState(false);
+  const [showQuote, setShowQuote] = useState(false);
+  const [showSeams, setShowSeams] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
   const [laserOpen, setLaserOpen] = useState(false);
@@ -488,7 +492,14 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
 
       <LevelBar property={full} levelId={levelId} />
 
-      <AreaBar property={full} levelId={levelId} onOpen={() => setShowMaterials(true)} />
+      <AreaBar
+        property={full}
+        levelId={levelId}
+        onOpen={() => setShowMaterials(true)}
+        onQuote={() => setShowQuote(true)}
+        onSeams={() => setShowSeams((v) => !v)}
+        seamsOn={showSeams}
+      />
 
       <LaserReadout
         label={
@@ -507,6 +518,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <PlanEditor
           property={property}
           mode={mode}
+          seamEdit={showSeams}
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
@@ -525,6 +537,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             Tap “Add room” to start
           </div>
         )}
+        {showSeams && <SeamDock property={full} onClose={() => setShowSeams(false)} />}
         {mode !== "select" && (
           <button
             type="button"
@@ -715,6 +728,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
+      {showQuote && <QuoteSheet property={full} onClose={() => setShowQuote(false)} />}
       {welcome && !helpOpen && (
         <WelcomeTip
           onStart={() => {
@@ -737,32 +751,48 @@ function AreaBar({
   property,
   levelId,
   onOpen,
+  onQuote,
+  onSeams,
+  seamsOn,
 }: {
   property: FieldProperty;
   levelId: string;
   onOpen: () => void;
+  onQuote: () => void;
+  onSeams: () => void;
+  seamsOn: boolean;
 }) {
   const s = areaSummary(property);
   const lvl = s.levels.find((l) => l.id === levelId);
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="flex min-h-12 items-center gap-3 border-b border-black/10 bg-[#fff8ec] px-3 text-left text-base"
-      aria-label="Open materials summary"
-    >
-      {property.levels.length > 1 && lvl && (
+    <div className="flex min-h-12 items-center gap-2 border-b border-black/10 bg-[#fff8ec] px-3 text-base">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-12 flex-1 items-center gap-3 text-left"
+        aria-label="Open materials summary"
+      >
+        {property.levels.length > 1 && lvl && (
+          <span>
+            {lvl.name} <b>{formatArea(lvl.area, property.units)}</b>
+          </span>
+        )}
         <span>
-          {lvl.name} <b>{formatArea(lvl.area, property.units)}</b>
+          Total <b>{formatArea(s.total, property.units)}</b>
         </span>
-      )}
-      <span>
-        Total <b>{formatArea(s.total, property.units)}</b>
-      </span>
-      <span className="ml-auto rounded-full bg-[#b4561d] px-3 py-1 text-sm font-semibold text-white">
-        Materials
-      </span>
-    </button>
+      </button>
+      <button type="button" onClick={onQuote} className="h-10 rounded-full bg-[#b4561d] px-3 text-sm font-semibold text-white">
+        Quote
+      </button>
+      <button
+        type="button"
+        onClick={onSeams}
+        aria-pressed={seamsOn}
+        className={`h-10 rounded-full px-3 text-sm font-semibold ${seamsOn ? "bg-black text-white" : "bg-black/5"}`}
+      >
+        Seams
+      </button>
+    </div>
   );
 }
 

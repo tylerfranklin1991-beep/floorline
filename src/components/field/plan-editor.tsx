@@ -1,4 +1,5 @@
-import { carpetLayout, listedArea, roomFlooring } from "@/lib/field/materials";
+import { listedArea, roomFlooring } from "@/lib/field/materials";
+import { carpetPlans } from "@/lib/field/tseam";
 import { closetPlanLabel } from "@/lib/field/arrow-draw";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -52,7 +53,8 @@ type Drag =
   | { kind: "wall"; roomId: string; index: number; start: Pt; points: Pt[] }
   | { kind: "draw"; start: Pt; end: Pt }
   | { kind: "stairs"; id: string; start: Pt; x: number; y: number }
-  | { kind: "pinch"; d0: number; mid0: Pt; view: View };
+  | { kind: "pinch"; d0: number; mid0: Pt; view: View }
+  | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 };
 
 const HANDLE_PX = 22;
 
@@ -68,6 +70,7 @@ export function PlanEditor({
   draft,
   draftOrigin,
   onRoomTap,
+  seamEdit,
 }: {
   property: FieldProperty;
   mode: EditorMode;
@@ -86,6 +89,8 @@ export function PlanEditor({
   } | null;
   draftOrigin?: Pt;
   onRoomTap?: (roomId: string | null) => void;
+  /** Seam lines can be dragged, and the T-seam diagram is drawn on top. */
+  seamEdit?: boolean;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 360, h: 480 });
@@ -251,6 +256,19 @@ export function PlanEditor({
       onPhotoTap(room.id, target!.dataset.photo!);
       return;
     }
+    if (h === "seam" && seamEdit) {
+      const ids = (target!.dataset.rooms ?? "").split(",").filter(Boolean);
+      const lead = property.rooms.find((r) => r.id === ids[0]);
+      beginDrag();
+      setDrag({
+        kind: "seam",
+        roomIds: ids,
+        start: p,
+        offsetFt: lead ? roomFlooring(lead, property.job).seamOffsetFt : 0,
+        pile: target!.dataset.pile === "90" ? 90 : 0,
+      });
+      return;
+    }
     const st = [...property.stairs].reverse().find((x) => {
       const r = stairsRect(x);
       return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
@@ -351,6 +369,24 @@ export function PlanEditor({
       const d = snap(horizontal ? p.y - drag.start.y : p.x - drag.start.x, step);
       const next = moveWall(drag.points, drag.index, d);
       if (edges(next).every((ed) => ed.length >= step)) setRoomPoints(drag.roomId, next);
+      return;
+    }
+    if (drag.kind === "seam") {
+      const dPlan = drag.pile === 90 ? drag.start.x - p.x : p.y - drag.start.y;
+      const dFt = property.units === "ft" ? dPlan : dPlan / 0.3048;
+      const lead = property.rooms.find((r) => r.id === drag.roomIds[0]);
+      const width = lead ? roomFlooring(lead, property.job).rollWidthFt : 12;
+      let next = drag.offsetFt + dFt;
+      next = ((next % width) + width) % width;
+      const offsetFt = Math.round(next * 100) / 100;
+      preview((prop) => ({
+        ...prop,
+        rooms: prop.rooms.map((r) =>
+          drag.roomIds.includes(r.id)
+            ? { ...r, flooring: { ...r.flooring, seamOffsetFt: offsetFt } }
+            : r,
+        ),
+      }));
     }
   };
 
@@ -379,7 +415,8 @@ export function PlanEditor({
       drag.kind === "room" ||
       drag.kind === "corner" ||
       drag.kind === "wall" ||
-      drag.kind === "stairs"
+      drag.kind === "stairs" ||
+      drag.kind === "seam"
     )
       commitDrag();
     setDrag(null);
@@ -477,23 +514,69 @@ export function PlanEditor({
               />
             );
           })}
-          {property.showSeams !== false &&
-            property.rooms.map((room) =>
-              roomFlooring(room, property.job).material === "carpet"
-                ? carpetLayout(room, property.units, roomFlooring(room, property.job)).seams.map((sm, i) => (
+          {(seamEdit || property.showSeams !== false) &&
+            carpetPlans(property).flatMap((plan) =>
+              plan.layout.marks.map((sm, i) => (
+                <g key={`seam${plan.roomIds.join("-")}${i}`}>
+                  {seamEdit && sm.kind === "seam" && (
                     <line
-                      key={`seam${room.id}${i}`}
                       x1={sm.a.x}
                       y1={sm.a.y}
                       x2={sm.b.x}
                       y2={sm.b.y}
-                      stroke="#d0342c"
-                      strokeWidth={px(2)}
-                      strokeDasharray={`${px(8)} ${px(5)}`}
-                      pointerEvents="none"
+                      stroke="transparent"
+                      strokeWidth={px(22)}
+                      data-h="seam"
+                      data-rooms={sm.roomIds.join(",")}
+                      data-pile={String(plan.layout.pileDeg)}
                     />
-                  ))
-                : null,
+                  )}
+                  <line
+                    x1={sm.a.x}
+                    y1={sm.a.y}
+                    x2={sm.b.x}
+                    y2={sm.b.y}
+                    stroke={sm.kind === "t" ? "#9a3412" : "#d0342c"}
+                    strokeWidth={px(sm.kind === "t" ? 3 : 2)}
+                    strokeDasharray={sm.kind === "t" ? undefined : `${px(8)} ${px(5)}`}
+                    pointerEvents="none"
+                  />
+                </g>
+              )),
+            )}
+          {(seamEdit || property.showSeams !== false) &&
+            carpetPlans(property).flatMap((plan) =>
+              plan.layout.pieces
+                .filter((piece) => piece.corners.length >= 3)
+                .map((piece) => {
+                  const c = {
+                    x: piece.corners.reduce((s, q) => s + q.x, 0) / piece.corners.length,
+                    y: piece.corners.reduce((s, q) => s + q.y, 0) / piece.corners.length,
+                  };
+                  const len = px(18);
+                  return (
+                    <g key={`pc${piece.n}`} pointerEvents="none">
+                      <line
+                        x1={c.x}
+                        y1={c.y}
+                        x2={c.x + piece.pile.x * len}
+                        y2={c.y + piece.pile.y * len}
+                        stroke="#1d4e89"
+                        strokeWidth={px(1.5)}
+                      />
+                      <text
+                        x={c.x}
+                        y={c.y - px(4)}
+                        fontSize={px(12)}
+                        fontWeight={700}
+                        textAnchor="middle"
+                        fill="#9a3412"
+                      >
+                        {piece.n}
+                      </text>
+                    </g>
+                  );
+                }),
             )}
           {property.openings.map((o) => {
             const room = property.rooms.find((r) => r.id === o.roomId);

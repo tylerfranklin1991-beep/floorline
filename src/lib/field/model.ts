@@ -117,6 +117,10 @@ export interface FieldProperty {
   reuseFills?: boolean;
   /** Show carpet seams on the plan and in exports (default on). */
   showSeams?: boolean;
+  /** Lay touching carpet rooms, halls and closets as one roll layout. */
+  combineCarpet?: boolean;
+  /** Last customer quote saved on this job. */
+  quote?: unknown;
   /** Per-job settings and customer info (see job.ts). */
   job?: Partial<JobSettings>;
   createdAt: number;
@@ -914,6 +918,8 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     includeStairs: v.includeStairs === true,
     reuseFills: v.reuseFills === true,
     showSeams: v.showSeams !== false,
+    combineCarpet: v.combineCarpet === true,
+    ...(v.quote && typeof v.quote === "object" ? { quote: v.quote } : {}),
     ...(v.job && typeof v.job === "object" ? { job: { ...v.job } } : {}),
     createdAt: Number(v.createdAt) || Date.now(),
     updatedAt: Number(v.updatedAt) || Date.now(),
