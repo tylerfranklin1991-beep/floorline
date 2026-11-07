@@ -62,6 +62,7 @@ import {
 import { useBackClose } from "@/lib/field/back";
 import { useField } from "@/lib/field/store";
 import type { EditorMode } from "./plan-editor";
+import { HelpMark } from "./tutorials-ui";
 
 const FT = (u: Units) => (u === "ft" ? 1 : 0.3048);
 
@@ -175,6 +176,7 @@ export function TracePanel({
               : "A hand sketch or photo behind this floor, to draw over."}
           </div>
         </div>
+        <HelpMark id="trace" label="How to trace over a photo" />
         <button
           type="button"
           aria-label="Close trace panel"

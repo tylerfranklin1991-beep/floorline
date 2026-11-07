@@ -71,6 +71,8 @@ import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
 import { ArrowSheet, LaserButton, LaserReadout, LaserSheet, type PlanDraft } from "./laser-controls";
+import { HelpButton, HelpMark, TutorialHost, WelcomeTip } from "./tutorials-ui";
+import { dismissWelcome, welcomePending } from "@/lib/field/tutorials";
 import { advanceLaserTarget } from "@/lib/field/arrow-draw";
 import { autoReconnect, onDistoReading, useDisto } from "@/lib/field/disto-link";
 import { metersToPlan } from "@/lib/field/disto-protocol";
@@ -284,6 +286,27 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   levelRef.current = levelId;
   arrowOnRef.current = arrowOn;
   const disto = useDisto();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState(false);
+  const openHelp = (id?: string) => {
+    setHelpTopic(id ?? null);
+    setHelpOpen(true);
+    setWelcome(false);
+  };
+  const openHelpRef = useRef(openHelp);
+  openHelpRef.current = openHelp;
+  useEffect(() => {
+    const onHelp = (e: Event) => openHelpRef.current(String((e as CustomEvent<string>).detail));
+    const onWelcome = () => setWelcome(true);
+    window.addEventListener("floorline-help", onHelp);
+    window.addEventListener("floorline-welcome", onWelcome);
+    if (welcomePending()) setWelcome(true);
+    return () => {
+      window.removeEventListener("floorline-help", onHelp);
+      window.removeEventListener("floorline-welcome", onWelcome);
+    };
+  }, []);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
 
   // Android back: close the top-most thing first (registration order = stacking order).
@@ -304,6 +327,11 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   });
   useBackClose(laserOpen, () => setLaserOpen(false));
   useBackClose(arrowOn, () => setArrowOn(false));
+  useBackClose(welcome, () => {
+    dismissWelcome();
+    setWelcome(false);
+  });
+  useBackClose(helpOpen, () => setHelpOpen(false));
 
   useEffect(() => {
     void autoReconnect();
@@ -479,7 +507,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   };
 
   return (
-    <div className="flex h-dvh flex-col bg-[#f6f2e8]">
+    <div className="relative flex h-dvh flex-col bg-[#f6f2e8]">
       <header
         className="flex items-center gap-1 border-b border-black/10 bg-white px-2 py-2"
         style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
@@ -515,6 +543,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           <Settings2 />
         </IconBtn>
         <LaserButton onClick={() => { setArrowOn(false); setLaserOpen((open) => !open); }} />
+        <HelpButton onClick={() => openHelp()} />
       </header>
 
       <LevelBar property={full} levelId={levelId} onTrace={() => setTraceOpen(true)} />
@@ -835,6 +864,19 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
+      {welcome && !helpOpen && (
+        <WelcomeTip
+          onStart={() => {
+            dismissWelcome();
+            openHelp("getting-started");
+          }}
+          onDismiss={() => {
+            dismissWelcome();
+            setWelcome(false);
+          }}
+        />
+      )}
+      {helpOpen && <TutorialHost app="beta" topic={helpTopic} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
@@ -1047,10 +1089,12 @@ function Sheet({
   onClose,
   children,
   title,
+  helpId,
 }: {
   onClose: () => void;
   children: React.ReactNode;
   title: string;
+  helpId?: string;
 }) {
   useBackClose(true, onClose);
   return (
@@ -1064,6 +1108,7 @@ function Sheet({
       >
         <div className="mb-4 flex items-center gap-2">
           <h2 className="flex-1 text-2xl font-bold">{title}</h2>
+          {helpId && <HelpMark id={helpId} />}
           <button
             type="button"
             aria-label="Close"
@@ -1406,7 +1451,7 @@ function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: 
     onClose();
   };
   return (
-    <Sheet title="Export plan" onClose={onClose}>
+    <Sheet title="Export plan" helpId="pdf" onClose={onClose}>
       <div className="grid gap-2">
         <MethodBtn
           icon={<Share2 />}
