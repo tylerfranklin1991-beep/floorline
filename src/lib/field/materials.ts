@@ -51,6 +51,11 @@ export interface RoomFlooring {
   seamOffsetFt: number;
   /** LVP plank direction: 0 = planks run left-right, 90 = up-down. */
   plankDeg: number;
+  /**
+   * Carpet pattern repeat along the pile, inches. 0 (or unset) cross-joins a
+   * fill every roll width. Does not change the plain seam layout.
+   */
+  patternRepeatIn?: number;
 }
 
 export const MATERIAL_LABEL: Record<FloorMaterial, string> = {

@@ -62,6 +62,8 @@ import { CalibrateSheet, PhotoShape, SketchImport, TracePanel } from "./sketch-t
 import { installBackHandler, useBackClose } from "@/lib/field/back";
 import { formatGeo, mapsUrl } from "@/lib/field/media";
 import { MaterialsScreen } from "./materials-screen";
+import { QuoteSheet } from "./quote-sheet";
+import { SeamDock } from "./seam-dock";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
@@ -264,6 +266,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [menu, setMenu] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
   const [showMaterials, setShowMaterials] = useState(false);
+  const [showQuote, setShowQuote] = useState(false);
+  const [showSeams, setShowSeams] = useState(false);
   const [openingPick, setOpeningPick] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
@@ -552,6 +556,9 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         property={full}
         levelId={levelId}
         onOpen={() => setShowMaterials(true)}
+        onQuote={() => setShowQuote(true)}
+        onSeams={() => setShowSeams((v) => !v)}
+        seamsOn={showSeams}
         onUnits={() => setUnits(property.units === "ft" ? "m" : "ft")}
       />
 
@@ -568,6 +575,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <PlanEditor
           property={property}
           mode={mode}
+          seamEdit={showSeams}
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
@@ -593,6 +601,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             Tap any room, wall length or door to edit it.
           </div>
         )}
+        {showSeams && <SeamDock property={full} onClose={() => setShowSeams(false)} />}
         {mode !== "select" && (
           <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
             <span className="flex-1">{MODE_HINT[mode]}</span>
@@ -864,6 +873,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
+      {showQuote && <QuoteSheet property={full} onClose={() => setShowQuote(false)} />}
       {welcome && !helpOpen && (
         <WelcomeTip
           onStart={() => {
@@ -912,11 +922,17 @@ function AreaBar({
   property,
   levelId,
   onOpen,
+  onQuote,
+  onSeams,
+  seamsOn,
   onUnits,
 }: {
   property: FieldProperty;
   levelId: string;
   onOpen: () => void;
+  onQuote: () => void;
+  onSeams: () => void;
+  seamsOn: boolean;
   onUnits: () => void;
 }) {
   const s = areaSummary(property);
@@ -937,6 +953,21 @@ function AreaBar({
         <span>
           Total <b>{formatArea(s.total, property.units)}</b>
         </span>
+      </button>
+      <button
+        type="button"
+        onClick={onQuote}
+        className="h-10 rounded-full bg-[#b4561d] px-3 text-sm font-semibold text-white"
+      >
+        Quote
+      </button>
+      <button
+        type="button"
+        onClick={onSeams}
+        aria-pressed={seamsOn}
+        className={`h-10 rounded-full px-3 text-sm font-semibold ${seamsOn ? "bg-black text-white" : "bg-black/5"}`}
+      >
+        Seams
       </button>
       <button
         type="button"

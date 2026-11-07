@@ -87,6 +87,14 @@ const CAPTURED_STEPS = new Set([
   "pdf:2",
   "pdf:3",
   "pdf:4",
+  "quote:1",
+  "quote:2",
+  "quote:3",
+  "quote:4",
+  "seams:1",
+  "seams:2",
+  "seams:3",
+  "seams:4",
 ]);
 
 const CAPTURED_VIDEOS = new Set(["getting-started"]);
@@ -276,6 +284,32 @@ export const TUTORIALS: Tutorial[] = [
       step("pdf", 2, "Share the PDF", "Share PDF floor plan sends a sheet with the plan, materials, and room photos."),
       step("pdf", 3, "Picture or backup", "PNG is the drawing. JSON is a backup you can import on another phone."),
       step("pdf", 4, "Back to the plan", "Close the sheet. The rooms are exactly where you left them."),
+    ],
+  },
+  {
+    id: "quote",
+    title: "Customer quote",
+    category: "Estimates & PDF",
+    blurb: "A priced PDF from the plan, with your logo and price list.",
+    apps: ["beta", "beta2"],
+    steps: [
+      step("quote", 1, "Open Quote", "Quote sits on the square-footage bar. The sheet opens on top of the sketch."),
+      step("quote", 2, "Your business", "Business holds the name, phone, email, license and logo. It starts as SCG — replace it once and it stays on this phone."),
+      step("quote", 3, "Fill in prices", "Every rate starts at $0. Type your price and it becomes the default for the next quote. Quantities come from the rooms."),
+      step("quote", 4, "Share the PDF", "Share PDF sends the quote, with a small plan on it, through the Android share sheet. It is also saved on the job."),
+    ],
+  },
+  {
+    id: "seams",
+    title: "Carpet seams and cuts",
+    category: "Estimates & PDF",
+    blurb: "12 ft rolls, T-seam fills, a cut list and a diagram on the plan.",
+    apps: ["beta", "beta2"],
+    steps: [
+      step("seams", 1, "Open Seams", "Seams is on the square-footage bar. The plan stays up so you can see the lines."),
+      step("seams", 2, "Roll and direction", "Pick 12, 13'6\" or 15. Auto direction chooses the way with less waste. Rotate pile turns it 90°."),
+      step("seams", 3, "Drag a seam", "Drag a dashed seam, or use the slider. Waste, linear feet and the cut list update as it moves."),
+      step("seams", 4, "T-seams and the cut sheet", "A fill longer than the roll is cross-joined. Piece numbers and pile arrows are on the plan, the job PDF and the installer cut sheet."),
     ],
   },
   {
