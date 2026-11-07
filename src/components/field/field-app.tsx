@@ -64,6 +64,8 @@ import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
 import { ArrowSheet, LaserButton, LaserReadout, LaserSheet, type PlanDraft } from "./laser-controls";
+import { HelpButton, HelpMark, TutorialHost, WelcomeTip } from "./tutorials-ui";
+import { dismissWelcome, welcomePending } from "@/lib/field/tutorials";
 import { advanceLaserTarget } from "@/lib/field/arrow-draw";
 import { autoReconnect, onDistoReading, useDisto } from "@/lib/field/disto-link";
 import { metersToPlan } from "@/lib/field/disto-protocol";
@@ -260,6 +262,27 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   levelRef.current = levelId;
   arrowOnRef.current = arrowOn;
   const disto = useDisto();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState(false);
+  const openHelp = (id?: string) => {
+    setHelpTopic(id ?? null);
+    setHelpOpen(true);
+    setWelcome(false);
+  };
+  const openHelpRef = useRef(openHelp);
+  openHelpRef.current = openHelp;
+  useEffect(() => {
+    const onHelp = (e: Event) => openHelpRef.current(String((e as CustomEvent<string>).detail));
+    const onWelcome = () => setWelcome(true);
+    window.addEventListener("floorline-help", onHelp);
+    window.addEventListener("floorline-welcome", onWelcome);
+    if (welcomePending()) setWelcome(true);
+    return () => {
+      window.removeEventListener("floorline-help", onHelp);
+      window.removeEventListener("floorline-welcome", onWelcome);
+    };
+  }, []);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
 
   useEffect(() => {
@@ -410,7 +433,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const step = property.rooms.length === 0 ? 1 : !room ? 2 : 3;
 
   return (
-    <div className="ar-scan-host flex h-dvh flex-col bg-[#f6f2e8]">
+    <div className="ar-scan-host relative flex h-dvh flex-col bg-[#f6f2e8]">
       <header
         className="flex items-center gap-1 border-b border-black/10 bg-white px-2 py-2"
         style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
@@ -446,6 +469,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           <Settings2 />
         </IconBtn>
         <LaserButton onClick={() => { setArrowOn(false); setLaserOpen((open) => !open); }} />
+        <HelpButton onClick={() => openHelp()} />
         <IconBtn label="Export" onClick={() => setMenu(true)}>
           <Download />
         </IconBtn>
@@ -691,6 +715,19 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
+      {welcome && !helpOpen && (
+        <WelcomeTip
+          onStart={() => {
+            dismissWelcome();
+            openHelp("getting-started");
+          }}
+          onDismiss={() => {
+            dismissWelcome();
+            setWelcome(false);
+          }}
+        />
+      )}
+      {helpOpen && <TutorialHost app="beta2" topic={helpTopic} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
@@ -821,10 +858,12 @@ function Sheet({
   onClose,
   children,
   title,
+  helpId,
 }: {
   onClose: () => void;
   children: React.ReactNode;
   title: string;
+  helpId?: string;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={onClose}>
@@ -835,7 +874,13 @@ function Sheet({
         style={{ paddingBottom: "max(1.25rem, env(safe-area-inset-bottom))" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="mb-4 text-2xl font-bold">{title}</h2>
+        <div className="mb-4 flex items-center gap-2">
+          <h2 className="flex-1 text-2xl font-bold">{title}</h2>
+          {helpId && <HelpMark id={helpId} />}
+          <button type="button" aria-label="Close" onClick={onClose} className="flex size-12 items-center justify-center rounded-full bg-black/5 text-2xl">
+            ×
+          </button>
+        </div>
         {children}
       </div>
     </div>
@@ -895,12 +940,17 @@ function AddRoomSheet({
         <div className="space-y-2">
           <div className="text-base font-semibold">Or capture / draw the shape</div>
           {hasNativeArScan() && (
-            <MethodBtn
-              icon={<ScanLine />}
-              title="ARCore scan (room to room)"
-              body="Beta 2: walk through the house with the camera on. Walls and floor are detected automatically; tap New room at each door."
-              onClick={() => onPick("arcore", n)}
-            />
+            <>
+              <MethodBtn
+                icon={<ScanLine />}
+                title="ARCore scan (room to room)"
+                body="Beta 2: walk through the house with the camera on. Walls and floor are detected automatically; tap New room at each door."
+                onClick={() => onPick("arcore", n)}
+              />
+              <div className="flex justify-end">
+                <HelpMark id="arcore" label="How the ARCore scan works" />
+              </div>
+            </>
           )}
           <MethodBtn
             icon={<ScanLine />}
@@ -1122,7 +1172,7 @@ function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: 
     onClose();
   };
   return (
-    <Sheet title="Export plan" onClose={onClose}>
+    <Sheet title="Export plan" helpId="pdf" onClose={onClose}>
       <div className="grid gap-2">
         <MethodBtn
           icon={<Share2 />}

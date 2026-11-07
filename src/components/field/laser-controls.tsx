@@ -31,6 +31,7 @@ import {
 } from "@/lib/field/disto-link";
 import { metersToPlan, planToMeters } from "@/lib/field/disto-protocol";
 import { formatLength, parseLength, uid, type Pt, type Units } from "@/lib/field/model";
+import { HelpMark } from "./tutorials-ui";
 
 export type PlanDraft = {
   points: Pt[];
@@ -131,6 +132,7 @@ export function LaserSheet({
       <header className="sticky top-0 flex items-center gap-2 border-b border-black/10 bg-white px-3 py-2">
         <span className={`size-3 rounded-full ${dotClass(disto.status)}`} />
         <h2 className="flex-1 text-lg font-bold">Laser</h2>
+        <HelpMark id="laser" label="How to connect the DISTO" />
         <button type="button" aria-label="Close laser" onClick={onClose} className="flex size-12 items-center justify-center rounded-full bg-black/5">
           <X />
         </button>
@@ -379,6 +381,10 @@ export function ArrowSheet({
     <div className="absolute inset-x-0 bottom-0 z-30 flex max-h-[58%] flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]">
       <header className="flex items-center gap-2 border-b border-black/10 bg-white px-3 py-2">
         <h2 className="flex-1 text-lg font-bold">{draft.closetChain ? "Closet" : "Draw with laser"}</h2>
+        <HelpMark
+          id={panel === "opening" ? "add-opening" : panel === "closet" || draft.closetChain ? "add-closet" : "draw-walls"}
+          label="How this drawing step works"
+        />
         <button type="button" onClick={() => undoRef.current?.()} disabled={hist.past.length === 0} className="h-11 rounded-full bg-black/5 px-3 text-sm font-semibold disabled:opacity-40">
           Undo
         </button>

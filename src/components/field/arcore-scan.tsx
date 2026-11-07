@@ -5,6 +5,7 @@ import { ArScan } from "@/lib/field/arcore";
 import { ArScanner, isFloor, isWall, scalePts, toPlan, type ScanRoom } from "@/lib/field/arscan";
 import { FT_PER_M } from "@/lib/field/deadreckon";
 import { bbox, defaultOpeningWidth, formatLength, type Pt, type Units } from "@/lib/field/model";
+import { HelpMark } from "./tutorials-ui";
 
 const GRID_M = 0.05;
 
@@ -137,6 +138,7 @@ export function ArCoreScan({
             {lw ? ` · now ${formatLength(lw.w * k, units)} × ${formatLength(lw.h * k, units)}` : ""}
           </div>
         </div>
+        <HelpMark id="arcore" label="How the ARCore scan works" />
         <button
           type="button"
           onClick={() => onCancel()}

@@ -24,6 +24,7 @@ import {
   type TransitionType,
 } from "@/lib/field/materials";
 import { PhotoSlots } from "./photo-slots";
+import { HelpMark } from "./tutorials-ui";
 import { AreasSection, FlooringSection } from "./room-flooring";
 
 const WALL_NAMES = (room: FieldRoom) =>
@@ -162,7 +163,10 @@ export function RoomPanel({
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-base font-bold">2 · Wall lengths</h3>
+        <h3 className="flex flex-1 items-center gap-2 text-base font-bold">
+          2 · Wall lengths
+          <HelpMark id="edit-walls" label="How to edit a wall length" />
+        </h3>
         <p className="text-sm text-black/55">
           Type your tape or laser reading. The opposite wall adjusts so the room stays square.
         </p>
@@ -305,7 +309,10 @@ export function RoomPanel({
       <AreasSection property={property} room={room} />
 
       <section className="space-y-2">
-        <h3 className="text-base font-bold">4 · Photos</h3>
+        <h3 className="flex items-center gap-2 text-base font-bold">
+          4 · Photos
+          <HelpMark id="photos" label="How photos and video work" />
+        </h3>
         <p className="text-sm text-black/55">
           1–2 snapshots so you can tell rooms apart later. They show on the plan.
         </p>
