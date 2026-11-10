@@ -576,10 +576,11 @@ export function translate(points: Pt[], dx: number, dy: number): Pt[] {
 }
 
 /**
- * Set wall `index` to `length`, keeping every wall horizontal/vertical.
- * The wall's end corner and the next corner slide along the wall's direction,
- * so the following wall moves intact and the opposite wall absorbs the change.
- * Returns null if the change would collapse a wall.
+ * Set wall `index` to `length` by sliding only that wall's end corner along
+ * the wall. Every other corner stays where it is, so the opposite wall keeps
+ * its length. The next wall may become diagonal and the outline may no longer
+ * close as a rectangle — {@link closureGap} is that miss. Returns null only
+ * when the length is unusable or a wall would shrink to nothing.
  */
 export function setWallLength(points: Pt[], index: number, length: number): Pt[] | null {
   const n = points.length;
@@ -590,15 +591,33 @@ export function setWallLength(points: Pt[], index: number, length: number): Pt[]
   if (current === 0) return null;
   const ux = (b.x - a.x) / current;
   const uy = (b.y - a.y) / current;
-  const delta = length - current;
   const i1 = (index + 1) % n;
-  const i2 = (index + 2) % n;
   const next = points.map((p, k) =>
-    k === i1 || k === i2 ? { x: round2(p.x + ux * delta), y: round2(p.y + uy * delta) } : { ...p },
+    k === i1 ? { x: round2(a.x + ux * length), y: round2(a.y + uy * length) } : { ...p },
   );
-  if (edges(next).some((e) => e.length < 0.1)) return null;
-  if (!isSimple(next)) return null;
+  if (edges(next).some((e) => e.length < 0.05)) return null;
   return next;
+}
+
+/**
+ * How far the outline misses a square close. Axis-aligned walls are walked on
+ * their axis; a wall already diagonal keeps its real direction. A rectangle
+ * reports 0. After one wall is lengthened on its own, this is the gap arrow
+ * mode would show instead of stretching the opposite wall.
+ */
+export function closureGap(points: Pt[]): number {
+  if (points.length < 3) return 0;
+  let x = 0;
+  let y = 0;
+  for (const e of edges(points)) {
+    const ang = Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x);
+    const step = Math.PI / 2;
+    const snapped = Math.round(ang / step) * step;
+    const use = Math.abs(ang - snapped) < (22 * Math.PI) / 180 ? snapped : ang;
+    x += Math.cos(use) * e.length;
+    y += Math.sin(use) * e.length;
+  }
+  return round2(Math.hypot(x, y));
 }
 
 /** Move corner k, dragging its two walls with it so the outline stays rectilinear. */

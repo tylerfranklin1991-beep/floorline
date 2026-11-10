@@ -9,6 +9,7 @@ import {
   edges,
   formatArea,
   formatLength,
+  closureGap,
   parseLength,
   ROOM_PRESETS,
   setWallLength,
@@ -168,8 +169,14 @@ export function RoomPanel({
           <HelpMark id="edit-walls" label="How to edit a wall length" />
         </h3>
         <p className="text-sm text-black/55">
-          Type your tape or laser reading. The opposite wall adjusts so the room stays square.
+          Type your tape or laser reading. Only this wall changes — the opposite wall keeps its length.
         </p>
+        {closureGap(room.points) > 0.08 && (
+          <p className="text-sm font-semibold text-[#8a3b12]">
+            Gap {formatLength(closureGap(room.points), u)}. The outline is not square; other walls were not adjusted.
+            Close room in Draw walls snaps an open outline shut.
+          </p>
+        )}
         <div className="space-y-2">
           {edges(room.points).map((e) => (
             <div

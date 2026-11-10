@@ -23,6 +23,7 @@ import {
   stairsLabel,
   stairsRect,
   stairsTreads,
+  closureGap,
   pointInPolygon,
   rectPoints,
   snap,
@@ -57,6 +58,8 @@ type Drag =
   | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 };
 
 const HANDLE_PX = 22;
+/** A press that moves farther than this is a drag, not a tap that opens the room menu. */
+const TAP_SLOP_PX = 10;
 
 export function PlanEditor({
   property,
@@ -70,6 +73,7 @@ export function PlanEditor({
   draft,
   draftOrigin,
   onRoomTap,
+  onSuppressMenu,
   seamEdit,
 }: {
   property: FieldProperty;
@@ -89,6 +93,8 @@ export function PlanEditor({
   } | null;
   draftOrigin?: Pt;
   onRoomTap?: (roomId: string | null) => void;
+  /** A drag passed the tap slop — keep the room menu closed. */
+  onSuppressMenu?: () => void;
   /** Seam lines can be dragged, and the T-seam diagram is drawn on top. */
   seamEdit?: boolean;
 }) {
@@ -97,6 +103,7 @@ export function PlanEditor({
   const [view, setView] = useState<View>({ scale: 24, tx: 40, ty: 40 });
   const [drag, setDrag] = useState<Drag | null>(null);
   const pointers = useRef(new Map<number, Pt>());
+  const press = useRef({ x: 0, y: 0, menu: false });
   const selectedRoomId = useField((s) => s.selectedRoomId);
   const select = useField((s) => s.select);
   const preview = useField((s) => s.preview);
@@ -165,9 +172,19 @@ export function PlanEditor({
 
   const roomAt = (p: Pt) => [...property.rooms].reverse().find((r) => pointInPolygon(p, r.points));
 
+  const noteSlop = (e: { clientX: number; clientY: number }) => {
+    const d = Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y);
+    if (d > TAP_SLOP_PX && !press.current.menu) {
+      press.current.menu = true;
+      onSuppressMenu?.();
+    }
+    return d > TAP_SLOP_PX;
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    press.current = { x: e.clientX, y: e.clientY, menu: false };
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       if (drag && drag.kind !== "pan" && drag.kind !== "pinch") commitDrag();
@@ -274,15 +291,12 @@ export function PlanEditor({
       return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
     });
     if (st) {
-      selectStairs(st.id);
       beginDrag();
       setDrag({ kind: "stairs", id: st.id, start: p, x: st.x, y: st.y });
       return;
     }
     const hit = roomAt(p);
     if (hit) {
-      select(hit.id);
-      onRoomTap?.(hit.id);
       beginDrag();
       setDrag({ kind: "room", roomId: hit.id, start: p, points: hit.points, moved: false });
       return;
@@ -335,6 +349,7 @@ export function PlanEditor({
       return;
     }
     if (drag.kind === "room") {
+      if (!noteSlop(e)) return;
       const dx = snap(p.x - drag.start.x, step);
       const dy = snap(p.y - drag.start.y, step);
       if (!dx && !dy && !drag.moved) return;
@@ -342,11 +357,13 @@ export function PlanEditor({
       const others = property.rooms.filter((r) => r.id !== drag.roomId).map((r) => r.points);
       const m = magnetOffset(next, others, 14 / view.scale);
       next = translate(next, m.dx, m.dy);
-      if (!drag.moved && (dx || dy)) setDrag({ ...drag, moved: true });
+      if (!drag.moved) setDrag({ ...drag, moved: true });
       setRoomPoints(drag.roomId, next);
       return;
     }
+    if (drag.kind === "corner" || drag.kind === "wall" || drag.kind === "seam") noteSlop(e);
     if (drag.kind === "stairs") {
+      if (!noteSlop(e)) return;
       const x = drag.x + snap(p.x - drag.start.x, step);
       const y = drag.y + snap(p.y - drag.start.y, step);
       preview((prop) => ({
@@ -411,14 +428,22 @@ export function PlanEditor({
       setDrag(null);
       return;
     }
-    if (
-      drag.kind === "room" ||
-      drag.kind === "corner" ||
-      drag.kind === "wall" ||
-      drag.kind === "stairs" ||
-      drag.kind === "seam"
-    )
+    if (drag.kind === "room") {
       commitDrag();
+      if (!drag.moved && !press.current.menu) {
+        select(drag.roomId);
+        onRoomTap?.(drag.roomId);
+      }
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "stairs") {
+      commitDrag();
+      if (!press.current.menu) selectStairs(drag.id);
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "corner" || drag.kind === "wall" || drag.kind === "seam") commitDrag();
     setDrag(null);
   };
 
@@ -473,6 +498,7 @@ export function PlanEditor({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onContextMenu={(e) => e.preventDefault()}
       onWheel={(e) => {
         const r = wrap.current!.getBoundingClientRect();
         const k = Math.exp(-e.deltaY * 0.0015);
@@ -703,6 +729,19 @@ export function PlanEditor({
                 >
                   {room.name}
                 </text>
+                {closureGap(room.points) > 0.08 && (
+                  <text
+                    x={c.x}
+                    y={c.y + fs * 2.35}
+                    fontSize={fs * 0.7}
+                    fontWeight={700}
+                    textAnchor="middle"
+                    fill="#8a3b12"
+                    pointerEvents="none"
+                  >
+                    Gap {formatLength(closureGap(room.points), property.units)}
+                  </text>
+                )}
                   <text
                     x={c.x}
                     y={c.y + fs * 1.15}
