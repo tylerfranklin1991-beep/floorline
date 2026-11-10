@@ -42,6 +42,7 @@ import {
   parseLength,
   rectilinearize,
   rectPoints,
+  closureGap,
   ensureClockwise,
   lShapePoints,
   ROOM_PRESETS,
@@ -364,6 +365,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       }
       lastShot.current = { roomId, wall, before: target.points, after: next };
       st.updateRoom(roomId, { points: next });
+      const gap = closureGap(next);
+      const gapNote = gap > 0.08 ? ` · gap ${formatLength(gap, units)}` : "";
       const rooms = prop.rooms
         .filter((r) => r.levelId === (levelRef.current || prop.levels[0]?.id))
         .map((r) => ({ id: r.id, wallCount: r.points.length }));
@@ -371,10 +374,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       if (adv) {
         st.select(adv.roomId);
         setFocusWall(adv.wall);
-        setLaserNote({ label, detail: `Wall ${wall + 1} set · next is wall ${adv.wall + 1}`, reshoot: true });
+        setLaserNote({ label, detail: `Wall ${wall + 1} set${gapNote} · next is wall ${adv.wall + 1}`, reshoot: true });
       } else {
         setFocusWall(wall);
-        setLaserNote({ label, detail: `Wall ${wall + 1} set · last wall on this floor`, reshoot: true });
+        setLaserNote({ label, detail: `Wall ${wall + 1} set${gapNote} · last wall on this floor`, reshoot: true });
       }
     });
   }, []);
@@ -585,8 +588,13 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           onWallTap={(roomId, wall) => {
             select(roomId);
             setFocusWall(wall);
+            setCollapsed(false);
           }}
-          onRoomTap={() => setFocusWall(null)}
+          onRoomTap={(id) => {
+            if (id) setFocusWall(null);
+          }}
+          onOpenMenu={() => setCollapsed(false)}
+          onSuppressMenu={() => setCollapsed(true)}
           onOpeningTap={() => setFocusWall(null)}
           onCalibrate={(a, b) => {
             setMode("select");

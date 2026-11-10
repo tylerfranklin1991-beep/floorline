@@ -155,7 +155,7 @@ export const TUTORIALS: Tutorial[] = [
       step("draw-room", 1, "Choose Draw", "From Add room, pick Draw. Or tap Draw on the toolbar."),
       step("draw-room", 2, "Drag the box", "Drag on the grid. The size shows as you drag. Let go to drop the room."),
       step("draw-room", 3, "Move a wall", "Tap the room. Drag a side or a corner. The shape stays square to the grid."),
-      step("draw-room", 4, "Type the real length", "Tap the length on a wall and type 12'6\" or 3.80. The opposite wall moves with it."),
+      step("draw-room", 4, "Type the real length", "Tap the length on a wall and type 12'6\" or 3.80. Only that wall changes."),
     ],
   },
   {
@@ -183,7 +183,7 @@ export const TUTORIALS: Tutorial[] = [
       step("edit-walls", 1, "Tap the length", "Tap the length label on the wall. That wall is highlighted."),
       step("edit-walls", 2, "The room panel", "Wall lengths are listed with a name (Top, Right, …). The one you tapped is ready to edit."),
       step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it."),
-      step("edit-walls", 4, "The room stays square", "The opposite wall takes up the change. If a length would fold the room, it is refused."),
+      step("edit-walls", 4, "Only that wall", "The opposite wall stays put. If the outline no longer closes square, the gap is shown. Close room is still there in Draw walls."),
       step("edit-walls", 5, "Undo", "The header Undo puts the previous shape back. Your other rooms stay as they were."),
     ],
   },

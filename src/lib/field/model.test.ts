@@ -16,6 +16,7 @@ import {
   rectilinearize,
   sanitizeProperty,
   setWallLength,
+  closureGap,
 } from "./model.ts";
 
 describe("rectilinearize", () => {
@@ -72,16 +73,21 @@ describe("rectilinearize", () => {
 });
 
 describe("editing walls", () => {
-  it("setWallLength resizes a rectangle and keeps it rectilinear", () => {
+  it("setWallLength changes only that wall and leaves the opposite wall", () => {
     const pts = rectPoints(0, 0, 10, 8);
     const out = setWallLength(pts, 0, 12.5);
     assert.ok(out);
-    assert.ok(isRectilinear(out!));
     const lens = edges(out!).map((e) => e.length);
-    assert.deepEqual(lens, [12.5, 8, 12.5, 8]);
+    assert.equal(lens[0], 12.5);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[3], 8);
+    assert.ok(lens[1] > 8);
+    assert.equal(area(out!), 90);
+    assert.ok(closureGap(out!) > 2);
+    assert.equal(closureGap(pts), 0);
   });
 
-  it("setWallLength refuses to collapse a wall", () => {
+  it("setWallLength on an L-shape does not move the far walls", () => {
     const L = [
       { x: 0, y: 0 },
       { x: 10, y: 0 },
@@ -90,7 +96,13 @@ describe("editing walls", () => {
       { x: 5, y: 10 },
       { x: 0, y: 10 },
     ];
-    assert.equal(setWallLength(L, 2, 10), null);
+    const out = setWallLength(L, 2, 10);
+    assert.ok(out);
+    const lens = edges(out!).map((e) => e.length);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[4], 5);
+    assert.equal(lens[5], 10);
+    assert.equal(setWallLength(L, 2, 0), null);
   });
 
   it("moveCorner drags adjacent walls", () => {
