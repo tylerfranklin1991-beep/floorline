@@ -24,6 +24,9 @@ import {
   stairsRect,
   stairsTreads,
   closureGap,
+  setWallLength,
+  snapWallLength,
+  wallSnapInches,
   pointInPolygon,
   rectPoints,
   snap,
@@ -55,7 +58,8 @@ type Drag =
   | { kind: "draw"; start: Pt; end: Pt }
   | { kind: "stairs"; id: string; start: Pt; x: number; y: number }
   | { kind: "pinch"; d0: number; mid0: Pt; view: View }
-  | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 };
+  | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 }
+  | { kind: "label"; roomId: string; index: number; points: Pt[]; moved: boolean };
 
 const HANDLE_PX = 22;
 /** A press that moves farther than this is a drag, not a tap that opens the room menu. */
@@ -277,8 +281,15 @@ export function PlanEditor({
       });
       return;
     }
-    if (h === "label" && room) {
-      onWallTap(room.id, Number(target!.dataset.i));
+    if (h === "label" && room && mode === "select") {
+      beginDrag();
+      setDrag({
+        kind: "label",
+        roomId: room.id,
+        index: Number(target!.dataset.i),
+        points: room.points,
+        moved: false,
+      });
       return;
     }
     if (h === "photo" && room) {
@@ -373,6 +384,21 @@ export function PlanEditor({
       setRoomPoints(drag.roomId, next);
       return;
     }
+    if (drag.kind === "label") {
+      if (!noteSlop(e)) return;
+      const src = drag.points;
+      const a = src[drag.index];
+      const b = src[(drag.index + 1) % src.length];
+      const span = Math.hypot(b.x - a.x, b.y - a.y);
+      if (span < 1e-6) return;
+      const raw = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / span;
+      const length = snapWallLength(raw, property.units, wallSnapInches());
+      const next = setWallLength(src, drag.index, length);
+      if (!next) return;
+      if (!drag.moved) setDrag({ ...drag, moved: true });
+      setRoomPoints(drag.roomId, next);
+      return;
+    }
     if (drag.kind === "corner" || drag.kind === "wall" || drag.kind === "seam") noteSlop(e);
     if (drag.kind === "stairs") {
       if (!noteSlop(e)) return;
@@ -436,6 +462,15 @@ export function PlanEditor({
           newRoom(drawName || `Room ${property.rooms.length + 1}`, rectPoints(x, y, w, h), "draw"),
         );
         onModeDone();
+      }
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "label") {
+      commitDrag();
+      if (!drag.moved && !press.current.menu) {
+        select(drag.roomId);
+        onWallTap(drag.roomId, drag.index);
       }
       setDrag(null);
       return;

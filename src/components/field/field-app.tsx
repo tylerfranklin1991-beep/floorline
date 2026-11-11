@@ -45,6 +45,8 @@ import {
   lShapePoints,
   ROOM_PRESETS,
   setWallLength,
+  wallSnapInches,
+  setWallSnapInches,
   translate,
   uid,
   type FieldOpening,
@@ -65,7 +67,7 @@ import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
-import { RoomPanel, LengthInput } from "./room-panel";
+import { RoomPanel, LengthInput, SquareUpButton } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
@@ -265,6 +267,7 @@ function SelectionBar({
   const updateRoom = useField((s) => s.updateRoom);
   const startY = useRef(0);
   const dragged = useRef(false);
+  const [snap, setSnap] = useState<0.5 | 1>(() => wallSnapInches());
   const edge = room && focusWall != null ? edges(room.points)[focusWall] : undefined;
   const title = stairs ? "Stairs" : (room?.name ?? "Room");
   const detail = stairs
@@ -337,6 +340,26 @@ function SelectionBar({
           </button>
         )}
       </div>
+      {room && <SquareUpButton room={room} units={property.units} />}
+      {room && edge && (
+        <div className="flex items-center gap-2 px-3 pb-2 text-xs font-semibold text-black/60">
+          <span>Drag snap</span>
+          {([0.5, 1] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={snap === n}
+              onClick={() => {
+                setWallSnapInches(n);
+                setSnap(n);
+              }}
+              className={`h-9 rounded-full px-3 ${snap === n ? "bg-black text-white" : "bg-black/5"}`}
+            >
+              {n === 0.5 ? "½\"" : "1\""}
+            </button>
+          ))}
+        </div>
+      )}
       {open && <div className="min-h-0 overflow-y-auto overscroll-contain border-t border-black/10">{children}</div>}
     </div>
   );
@@ -630,20 +653,23 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         seamsOn={showSeams}
       />
 
-      <LaserReadout
-        label={
-          laserNote?.label ||
-          (disto.last
-            ? formatLength(metersToPlan(disto.last.meters, property.units), property.units)
-            : disto.status === "connected"
-              ? disto.name || "DISTO"
-              : "Laser")
-        }
-        detail={laserNote?.detail ?? null}
-        onReshoot={laserNote?.reshoot ? reshoot : null}
-      />
-
       <div className="relative min-h-0 flex-1">
+        <div className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-1rem)]">
+          <div className="pointer-events-auto">
+            <LaserReadout
+              label={
+                laserNote?.label ||
+                (disto.last
+                  ? formatLength(metersToPlan(disto.last.meters, property.units), property.units)
+                  : disto.status === "connected"
+                    ? disto.name || "DISTO"
+                    : "Laser")
+              }
+              detail={laserNote?.detail ?? null}
+              onReshoot={laserNote?.reshoot ? reshoot : null}
+            />
+          </div>
+        </div>
         <PlanEditor
           property={property}
           mode={mode}
