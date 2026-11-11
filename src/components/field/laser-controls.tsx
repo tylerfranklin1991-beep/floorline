@@ -88,9 +88,22 @@ export function LaserReadout({
   onReshoot: (() => void) | null;
 }) {
   const disto = useDisto();
-  if (disto.status === "off" && !detail) return null;
+  const live =
+    disto.status === "connected" ||
+    disto.status === "connecting" ||
+    disto.status === "scanning" ||
+    Boolean(disto.error) ||
+    (Boolean(detail) && disto.status !== "off" && disto.status !== "disconnected");
+  if (!live) {
+    return (
+      <div className="pointer-events-none inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+        <span className={`size-2 rounded-full ${dotClass(disto.status)}`} />
+        Laser idle
+      </div>
+    );
+  }
   return (
-    <div className="flex items-center gap-3 border-b border-black/10 bg-[#1c1b18] px-3 py-2 text-white">
+    <div className="flex items-center gap-3 border-b border-black/10 bg-[#1c1b18] px-3 py-2 text-white shadow">
       <span className={`size-2.5 shrink-0 rounded-full ${dotClass(disto.status)}`} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-2xl font-bold leading-tight">{label}</div>

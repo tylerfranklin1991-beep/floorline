@@ -181,9 +181,9 @@ export const TUTORIALS: Tutorial[] = [
     apps: ["beta", "beta2"],
     steps: [
       step("edit-walls", 1, "Tap the length", "Tap the length label on the wall. That wall is highlighted."),
-      step("edit-walls", 2, "The room bar", "A short bar shows the name and square feet. Type the length there, or swipe the bar up for every wall. Done or a swipe down collapses it."),
-      step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it."),
-      step("edit-walls", 4, "Only that wall", "The opposite wall stays put. If the outline no longer closes square, the gap is shown. Close room is still there in Draw walls."),
+      step("edit-walls", 2, "The room bar", "A short bar shows the name and square feet. Type the length there, or drag the length on the plan (it snaps to ½ inch). Swipe the bar up for every wall."),
+      step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it. Dragging a label changes only that wall."),
+      step("edit-walls", 4, "Square up", "If a gap is shown, Square up previews the last wall, or the wall you pick, before it changes anything. Undo puts it back."),
       step("edit-walls", 5, "Undo", "The header Undo puts the previous shape back. Your other rooms stay as they were."),
     ],
   },
@@ -195,7 +195,7 @@ export const TUTORIALS: Tutorial[] = [
     apps: ["beta", "beta2"],
     ...clip("laser"),
     steps: [
-      step("laser", 1, "Tap the ruler", "Connect laser is in the header. The dot is gray when off, amber while it looks, green when the DISTO is on."),
+      step("laser", 1, "Tap the ruler", "Connect laser is in the header. Until the DISTO is connected, the plan only shows a small Laser idle mark."),
       step("laser", 2, "Wake the laser", "Turn Bluetooth on. Hold the DISTO Bluetooth key until it is discoverable. Or switch on Simulate DISTO to practice."),
       step("laser", 3, "Pick the DISTO", "Tap the name in the list. Floorline remembers it and reconnects next time. The plan is not touched if the link drops."),
       step("laser", 4, "Tap a wall, press DIST", "Select the wall on the sketch, then press DIST on the laser. The length shows in feet-and-inches or metres."),

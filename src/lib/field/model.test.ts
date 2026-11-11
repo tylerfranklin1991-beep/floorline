@@ -17,6 +17,8 @@ import {
   sanitizeProperty,
   setWallLength,
   closureGap,
+  squareUp,
+  snapWallLength,
 } from "./model.ts";
 
 describe("rectilinearize", () => {
@@ -85,6 +87,25 @@ describe("editing walls", () => {
     assert.equal(area(out!), 90);
     assert.ok(closureGap(out!) > 2);
     assert.equal(closureGap(pts), 0);
+  });
+
+  it("squareUp closes a stretched rectangle by the wall that can, and previews the change", () => {
+    const pts = rectPoints(0, 0, 10, 8);
+    const open = setWallLength(pts, 0, 12.5)!;
+    assert.ok(closureGap(open) > 2);
+    const last = squareUp(open, open.length - 1);
+    // The last wall is vertical, so it cannot eat a horizontal gap.
+    assert.equal(last, null);
+    const fix = squareUp(open, 0)!;
+    assert.ok(fix);
+    assert.ok(fix.gapAfter < 0.1);
+    assert.ok(fix.changes.some((c) => c.wall === 0));
+    assert.equal(fix.changes.filter((c) => c.wall === 2 || c.wall === 3).length, 0);
+  });
+
+  it("snapWallLength lands on half inches", () => {
+    assert.equal(snapWallLength(10.04, "ft", 0.5), 10 + 0.5 / 12);
+    assert.equal(snapWallLength(10.02, "ft", 1), 10);
   });
 
   it("setWallLength on an L-shape does not move the far walls", () => {

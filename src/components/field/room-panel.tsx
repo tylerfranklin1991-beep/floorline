@@ -13,6 +13,7 @@ import {
   parseLength,
   ROOM_PRESETS,
   setWallLength,
+  squareUp,
   type FieldProperty,
   type FieldRoom,
 } from "@/lib/field/model";
@@ -77,6 +78,76 @@ export function LengthInput({
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       className="h-12 w-28 rounded-xl border border-black/15 bg-white px-3 text-right text-lg font-semibold"
     />
+  );
+}
+
+export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldProperty["units"] }) {
+  const updateRoom = useField((s) => s.updateRoom);
+  const [open, setOpen] = useState(false);
+  const [wall, setWall] = useState(() => Math.max(0, room.points.length - 1));
+  useEffect(() => setWall(Math.max(0, room.points.length - 1)), [room.id, room.points.length]);
+  const gap = closureGap(room.points);
+  if (gap <= 0.08) return null;
+  const plan = open ? squareUp(room.points, wall) : null;
+  return (
+    <div className="border-t border-black/10 px-3 py-2">
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="h-12 w-full rounded-xl bg-[#b4561d] text-sm font-bold text-white">
+          Square up · gap {formatLength(gap, units)}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <label className="block text-sm font-semibold">
+            Wall to adjust
+            <select
+              aria-label="Wall to square up"
+              value={wall}
+              onChange={(e) => setWall(Number(e.target.value))}
+              className="mt-1 h-12 w-full rounded-xl border border-black/15 bg-white px-3 text-base"
+            >
+              {room.points.map((_, i) => (
+                <option key={i} value={i}>
+                  Wall {i + 1}
+                  {i === room.points.length - 1 ? " (last)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {plan ? (
+            <ul className="text-sm">
+              {plan.changes.map((c) => (
+                <li key={c.wall}>
+                  Wall {c.wall + 1}: {formatLength(c.from, units)} → {formatLength(c.to, units)}
+                  {c.wall !== wall ? " (shares the moved corner)" : ""}
+                </li>
+              ))}
+              <li>
+                Gap {formatLength(plan.gapBefore, units)} → {formatLength(plan.gapAfter, units)}
+              </li>
+            </ul>
+          ) : (
+            <p className="text-sm text-[#8a3b12]">This wall can't close the gap. Pick another.</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!plan}
+              onClick={() => {
+                if (!plan) return;
+                updateRoom(room.id, { points: plan.points });
+                setOpen(false);
+              }}
+              className="h-12 flex-1 rounded-xl bg-black text-sm font-bold text-white disabled:opacity-40"
+            >
+              Apply
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="h-12 flex-1 rounded-xl bg-black/5 text-sm font-semibold">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

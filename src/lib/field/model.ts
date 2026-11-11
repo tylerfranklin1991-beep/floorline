@@ -663,8 +663,9 @@ export function setWallLength(points: Pt[], index: number, length: number): Pt[]
   const ux = (b.x - a.x) / current;
   const uy = (b.y - a.y) / current;
   const i1 = (index + 1) % n;
+  const r4 = (v: number) => Math.round(v * 10000) / 10000;
   const next = points.map((p, k) =>
-    k === i1 ? { x: round2(a.x + ux * length), y: round2(a.y + uy * length) } : { ...p },
+    k === i1 ? { x: r4(a.x + ux * length), y: r4(a.y + uy * length) } : { ...p },
   );
   if (edges(next).some((e) => e.length < 0.05)) return null;
   return next;
@@ -689,6 +690,86 @@ export function closureGap(points: Pt[]): number {
     y += Math.sin(use) * e.length;
   }
   return round2(Math.hypot(x, y));
+}
+
+/** Nearest ½" or 1" (feet), or the same distance in metres. */
+export function snapWallLength(length: number, units: Units, inches: 0.5 | 1): number {
+  const step = units === "ft" ? inches / 12 : (inches / 12) * 0.3048;
+  if (!(step > 0) || !(length > 0)) return length;
+  return Math.max(step, Math.round(length / step) * step);
+}
+
+const WALL_SNAP_KEY = "floorline.wall-snap-in";
+
+export function wallSnapInches(): 0.5 | 1 {
+  try {
+    return globalThis.localStorage?.getItem(WALL_SNAP_KEY) === "1" ? 1 : 0.5;
+  } catch {
+    return 0.5;
+  }
+}
+
+export function setWallSnapInches(n: 0.5 | 1) {
+  try {
+    globalThis.localStorage?.setItem(WALL_SNAP_KEY, String(n));
+  } catch {
+    /* private mode */
+  }
+}
+
+export type SquareUpChange = { wall: number; from: number; to: number };
+
+/**
+ * Close the gap by changing one wall's length (its end corner only).
+ * The next wall can change because it shares that corner; every other
+ * wall keeps its length. `changes` lists both so nothing is silent.
+ */
+export function squareUp(
+  points: Pt[],
+  wall: number,
+): { points: Pt[]; changes: SquareUpChange[]; gapBefore: number; gapAfter: number } | null {
+  const n = points.length;
+  if (wall < 0 || wall >= n || n < 3) return null;
+  const before = edges(points).map((e) => e.length);
+  const gapBefore = closureGap(points);
+  const span = Math.max(gapBefore * 4, before[wall], 1);
+  const lo = 0.15;
+  const hi = before[wall] + span;
+  let bestLen = before[wall];
+  let bestGap = gapBefore;
+  let bestPts: Pt[] = points;
+  const consider = (len: number) => {
+    const pts = setWallLength(points, wall, len);
+    if (!pts) return;
+    const g = closureGap(pts);
+    const closer = g < bestGap - 0.005;
+    const same = Math.abs(g - bestGap) <= 0.005 && Math.abs(len - before[wall]) < Math.abs(bestLen - before[wall]);
+    if (closer || same) {
+      bestGap = g;
+      bestLen = len;
+      bestPts = pts;
+    }
+  };
+  for (let i = 0; i <= 64; i++) consider(lo + ((hi - lo) * i) / 64);
+  let left = Math.max(lo, bestLen - span / 10);
+  let right = bestLen + span / 10;
+  for (let k = 0; k < 18; k++) {
+    const m1 = left + (right - left) / 3;
+    const m2 = right - (right - left) / 3;
+    const p1 = setWallLength(points, wall, m1);
+    const p2 = setWallLength(points, wall, m2);
+    const g1 = p1 ? closureGap(p1) : Infinity;
+    const g2 = p2 ? closureGap(p2) : Infinity;
+    if (g1 < g2) right = m2;
+    else left = m1;
+  }
+  consider((left + right) / 2);
+  if (bestGap > gapBefore - 0.04) return null;
+  const after = edges(bestPts).map((e) => e.length);
+  const changes = after
+    .map((to, i) => ({ wall: i, from: round2(before[i]), to: round2(to) }))
+    .filter((c) => Math.abs(c.to - c.from) > 0.02);
+  return { points: bestPts, changes, gapBefore: round2(gapBefore), gapAfter: round2(bestGap) };
 }
 
 /** Move corner k, dragging its two walls with it so the outline stays rectilinear. */
