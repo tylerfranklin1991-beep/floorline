@@ -141,7 +141,7 @@ export const TUTORIALS: Tutorial[] = [
       step("add-room", 1, "Tap Add room", "The sheet lists every way to make a room: draw, type a size, photo, or a walk."),
       step("add-room", 2, "Name it", "Living, MBR, closet — the name is on the plan and in the PDF."),
       step("add-room", 3, "Place it", "A drawn or typed room drops next to the rooms you already have."),
-      step("add-room", 4, "Next room", "Open the room and tap Next room when the lengths look right."),
+      step("add-room", 4, "Next room", "A bar names the room. The tools under the plan stay put. Swipe the bar up when you need the rest of the room."),
     ],
   },
   {
@@ -181,7 +181,7 @@ export const TUTORIALS: Tutorial[] = [
     apps: ["beta", "beta2"],
     steps: [
       step("edit-walls", 1, "Tap the length", "Tap the length label on the wall. That wall is highlighted."),
-      step("edit-walls", 2, "The room panel", "Wall lengths are listed with a name (Top, Right, …). The one you tapped is ready to edit."),
+      step("edit-walls", 2, "The room bar", "A short bar shows the name and square feet. Type the length there, or swipe the bar up for every wall. Done or a swipe down collapses it."),
       step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it."),
       step("edit-walls", 4, "Only that wall", "The opposite wall stays put. If the outline no longer closes square, the gap is shown. Close room is still there in Draw walls."),
       step("edit-walls", 5, "Undo", "The header Undo puts the previous shape back. Your other rooms stay as they were."),
@@ -253,7 +253,7 @@ export const TUTORIALS: Tutorial[] = [
     blurb: "A picture or clip on the room, with time and GPS when the phone has them.",
     apps: ["beta", "beta2"],
     steps: [
-      step("photos", 1, "Open the room", "Tap the room. Photos & video is in the panel."),
+      step("photos", 1, "Open the room", "Tap the room, then the arrow on the bar. Photos & video is in that menu."),
       step("photos", 2, "Camera or gallery", "Take a photo, pick one, record a video, or pick a video. You stay on the sketch."),
       step("photos", 3, "Stamp", "Each one keeps the time. GPS is added when location is allowed."),
       step("photos", 4, "On the plan and the PDF", "Thumbnails sit on the room. They are included when you share the PDF."),

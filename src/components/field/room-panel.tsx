@@ -205,7 +205,7 @@ export function RoomPanel({
                 label={`Wall ${e.index + 1} length`}
                 value={e.length}
                 units={u}
-                autoFocus={focusWall === e.index}
+                autoFocus={false}
                 onCommit={(n) => {
                   const next = setWallLength(room.points, e.index, n);
                   if (!next) return false;

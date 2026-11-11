@@ -104,6 +104,8 @@ export function PlanEditor({
   const [drag, setDrag] = useState<Drag | null>(null);
   const pointers = useRef(new Map<number, Pt>());
   const press = useRef({ x: 0, y: 0, menu: false });
+  const measured = useRef(false);
+  const fitKey = useRef("");
   const selectedRoomId = useField((s) => s.selectedRoomId);
   const select = useField((s) => s.select);
   const preview = useField((s) => s.preview);
@@ -121,9 +123,13 @@ export function PlanEditor({
   useLayoutEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    const apply = () => {
+      measured.current = true;
+      setSize({ w: el.clientWidth, h: el.clientHeight });
+    };
+    const ro = new ResizeObserver(apply);
     ro.observe(el);
-    setSize({ w: el.clientWidth, h: el.clientHeight });
+    apply();
     return () => ro.disconnect();
   }, []);
 
@@ -155,9 +161,15 @@ export function PlanEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx]);
 
+  // Fit when the job changes or the user asks. A keyboard or menu must not
+  // zoom the plan just because the canvas element changed size.
   useEffect(() => {
+    if (!measured.current || size.w < 40 || size.h < 40) return;
+    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}`;
+    if (fitKey.current === key) return;
+    fitKey.current = key;
     fit();
-  }, [fit, fitNonce]);
+  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -790,6 +802,7 @@ export function PlanEditor({
                   const label = formatLength(e.length, property.units);
                   const bw = px(label.length * 7.5 + 14);
                   const bh = px(22);
+                  const hit = px(44);
                   return (
                     <g
                       key={e.index}
@@ -799,6 +812,7 @@ export function PlanEditor({
                       transform={`translate(${tx} ${ty}) rotate(${labelRotation(e)})`}
                       style={{ cursor: "pointer" }}
                     >
+                      <rect x={-Math.max(bw, hit) / 2} y={-hit / 2} width={Math.max(bw, hit)} height={hit} fill="transparent" />
                       <rect
                         x={-bw / 2}
                         y={-bh / 2}

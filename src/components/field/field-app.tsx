@@ -17,8 +17,10 @@ import {
   ChartNoAxesColumnIncreasing as StairsIcon,
   Pencil,
   Settings2,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { isArSupported } from "@/lib/field/ar";
 import { hasNativeArScan } from "@/lib/field/arcore";
@@ -26,6 +28,7 @@ import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
   area,
   bbox,
+  edges,
   formatArea,
   formatLength,
   gridStep,
@@ -62,7 +65,7 @@ import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
-import { RoomPanel } from "./room-panel";
+import { RoomPanel, LengthInput } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
@@ -219,6 +222,126 @@ function HomeScreen() {
 
 /* ------------------------------------------------------------ property */
 
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const covered = window.innerHeight - vv.height - vv.offsetTop;
+      setInset(covered > 80 ? Math.round(covered) : 0);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+  return inset;
+}
+
+/** Compact room bar. It overlays the plan, so opening it does not resize the canvas. */
+function SelectionBar({
+  property,
+  room,
+  stairs,
+  open,
+  focusWall,
+  keyboard,
+  onOpenChange,
+  children,
+}: {
+  property: FieldProperty;
+  room: FieldRoom | null;
+  stairs: FieldProperty["stairs"][number] | null;
+  open: boolean;
+  focusWall: number | null;
+  keyboard: number;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  const updateRoom = useField((s) => s.updateRoom);
+  const startY = useRef(0);
+  const dragged = useRef(false);
+  const edge = room && focusWall != null ? edges(room.points)[focusWall] : undefined;
+  const title = stairs ? "Stairs" : (room?.name ?? "Room");
+  const detail = stairs
+    ? stairs.steps
+      ? `${stairs.steps} steps`
+      : ""
+    : room
+      ? formatArea(area(room.points), property.units)
+      : "";
+  return (
+    <div
+      className={`z-30 flex flex-col rounded-t-2xl border border-black/10 bg-[#fbf7ed] shadow-[0_-6px_18px_rgba(0,0,0,0.12)] ${open ? "max-h-[52%]" : ""}`}
+      style={
+        keyboard > 0
+          ? { position: "fixed", left: 8, right: 8, bottom: keyboard + 8 }
+          : { position: "absolute", left: 8, right: 8, bottom: 8 }
+      }
+      role="dialog"
+      aria-label={open ? "Room menu" : "Room"}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex min-h-14 items-center gap-1 pr-2">
+        <button
+          type="button"
+          aria-label={open ? "Collapse room menu" : "Expand room menu"}
+          className="flex min-h-14 min-w-0 flex-1 items-center gap-1 px-1 text-left"
+          onPointerDown={(e) => {
+            startY.current = e.clientY;
+            dragged.current = false;
+          }}
+          onPointerMove={(e) => {
+            if (Math.abs(e.clientY - startY.current) > 10) dragged.current = true;
+          }}
+          onPointerUp={(e) => {
+            const dy = e.clientY - startY.current;
+            if (dy < -28) onOpenChange(true);
+            else if (dy > 28) onOpenChange(false);
+          }}
+          onClick={() => {
+            if (dragged.current) return;
+            onOpenChange(!open);
+          }}
+        >
+          {open ? <ChevronDown className="size-7 shrink-0" /> : <ChevronUp className="size-7 shrink-0" />}
+          <span className="min-w-0">
+            <span className="block truncate text-lg font-bold leading-tight">{title}</span>
+            {detail && <span className="block text-sm text-black/55">{detail}</span>}
+          </span>
+        </button>
+        {!open && edge && room && (
+          <LengthInput
+            label={`Wall ${edge.index + 1} length`}
+            value={edge.length}
+            units={property.units}
+            onCommit={(n) => {
+              const next = setWallLength(room.points, edge.index, n);
+              if (!next) return false;
+              updateRoom(room.id, { points: next });
+              return true;
+            }}
+          />
+        )}
+        {open && (
+          <button
+            type="button"
+            className="h-12 shrink-0 rounded-full bg-black px-4 text-sm font-bold text-white"
+            onClick={() => onOpenChange(false)}
+          >
+            Done
+          </button>
+        )}
+      </div>
+      {open && <div className="min-h-0 overflow-y-auto overscroll-contain border-t border-black/10">{children}</div>}
+    </div>
+  );
+}
+
 type Capture = null | { kind: "ar" | "walk" | "walkmode" | "arcore"; name: string };
 
 function PropertyScreen({ property: full }: { property: FieldProperty }) {
@@ -252,6 +375,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [showQuote, setShowQuote] = useState(false);
   const [showSeams, setShowSeams] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const keyboard = useKeyboardInset();
   const [drawName, setDrawName] = useState<string | null>(null);
   const [laserOpen, setLaserOpen] = useState(false);
   const [arrowOn, setArrowOn] = useState(false);
@@ -333,6 +458,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       }
       lastShot.current = { roomId, wall, before: target.points, after: next };
       st.updateRoom(roomId, { points: next });
+      setMenuOpen(false);
       const gap = closureGap(next);
       const gapNote = gap > 0.08 ? ` · gap ${formatLength(gap, units)}` : "";
       const rooms = prop.rooms
@@ -535,11 +661,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           onRoomTap={(id) => {
             if (id) setFocusWall(null);
           }}
-          onSuppressMenu={() => {
-            select(null);
-            selectStairs(null);
-            setFocusWall(null);
-          }}
+          onSuppressMenu={() => setMenuOpen(false)}
           onPhotoTap={(roomId, photoId) => setPhoto({ roomId, photoId })}
         />
         {property.rooms.length === 0 && mode === "select" && (
@@ -556,6 +678,33 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           >
             Cancel
           </button>
+        )}
+        {(stairs || room) && mode === "select" && (
+          <SelectionBar
+            property={property}
+            room={room}
+            stairs={stairs}
+            open={menuOpen}
+            focusWall={focusWall}
+            keyboard={keyboard}
+            onOpenChange={setMenuOpen}
+          >
+            {stairs ? (
+              <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
+            ) : (
+              <RoomPanel
+                property={property}
+                room={room!}
+                focusWall={focusWall}
+                onPlace={(k) => setMode(k)}
+                onClose={() => {
+                  select(null);
+                  setFocusWall(null);
+                }}
+                onViewPhoto={(photoId) => setPhoto({ roomId: room!.id, photoId })}
+              />
+            )}
+          </SelectionBar>
         )}
       </div>
 
@@ -600,35 +749,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         />
       )}
 
-      {stairs ? (
-        <div
-          className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-        >
-          <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
-        </div>
-      ) : room ? (
-        <div
-          className="max-h-[55dvh] overflow-y-auto border-t border-black/10 bg-[#fbf7ed]"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-        >
-          <RoomPanel
-            property={property}
-            room={room}
-            focusWall={focusWall}
-            onPlace={(k) => setMode(k)}
-            onClose={() => {
-              select(null);
-              setFocusWall(null);
-            }}
-            onViewPhoto={(photoId) => setPhoto({ roomId: room.id, photoId })}
-          />
-        </div>
-      ) : (
-        <div
-          className="grid grid-cols-[1fr_auto_auto] gap-2 border-t border-black/10 bg-white p-3"
-          style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
-        >
+      <div
+        className="grid grid-cols-[1fr_auto_auto] gap-2 border-t border-black/10 bg-white p-3"
+        style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+      >
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -654,8 +778,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           >
             {property.units === "ft" ? "ft" : "m"}
           </button>
-        </div>
-      )}
+      </div>
 
       {adding && (
         <AddRoomSheet
