@@ -88,16 +88,70 @@ setOnSaveError(() => {
   );
 });
 
+/** The document itself never scrolls. The keyboard can pan a WebView and leave it there. */
+function useDocumentScrollLock() {
+  useEffect(() => {
+    const root = document.documentElement;
+    const reset = () => {
+      window.scrollTo(0, 0);
+      root.scrollLeft = 0;
+      root.scrollTop = 0;
+      document.body.scrollLeft = 0;
+      document.body.scrollTop = 0;
+    };
+    const fit = () => {
+      const vv = window.visualViewport;
+      const h = vv?.height ?? window.innerHeight;
+      root.style.setProperty("--app-height", `${Math.round(h)}px`);
+      const keyboard = vv ? window.innerHeight - vv.height > 80 : false;
+      if (!keyboard) reset();
+    };
+    fit();
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    const onHide = () => {
+      window.setTimeout(reset, 0);
+      window.setTimeout(reset, 80);
+      window.setTimeout(reset, 320);
+    };
+    window.addEventListener("focusout", onHide);
+    const keyboard = (
+      window as unknown as {
+        Capacitor?: { Plugins?: { Keyboard?: { addListener?: (ev: string, cb: () => void) => { remove: () => void } } } };
+      }
+    ).Capacitor?.Plugins?.Keyboard;
+    const hideHandle = keyboard?.addListener?.("keyboardDidHide", onHide);
+    return () => {
+      vv?.removeEventListener("resize", fit);
+      vv?.removeEventListener("scroll", fit);
+      window.removeEventListener("focusout", onHide);
+      hideHandle?.remove();
+    };
+  }, []);
+}
+
 export function FieldApp() {
+  useDocumentScrollLock();
   const property = useCurrentProperty();
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     if (useField.persist.hasHydrated()) setHydrated(true);
     return useField.persist.onFinishHydration(() => setHydrated(true));
   }, []);
+  const shell = "fixed inset-0 flex w-full max-w-full flex-col overflow-hidden bg-[#f6f2e8]";
+  const shellStyle = { height: "var(--app-height, 100dvh)" };
   if (!hydrated)
-    return <div className="flex h-dvh items-center justify-center text-lg">Loading…</div>;
-  return property ? <PropertyScreen property={property} /> : <HomeScreen />;
+    return (
+      <div className={`${shell} items-center justify-center text-lg`} style={shellStyle}>
+        Loading…
+      </div>
+    );
+  return (
+    <div className={shell} style={shellStyle}>
+      {property ? <PropertyScreen property={property} /> : <HomeScreen />}
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------------- home */
@@ -114,7 +168,7 @@ function HomeScreen() {
 
   return (
     <div
-      className="mx-auto min-h-dvh max-w-xl space-y-6 p-5"
+      className="mx-auto min-h-0 w-full max-w-xl flex-1 space-y-6 overflow-y-auto p-5"
       style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
     >
       <header>
@@ -149,7 +203,10 @@ function HomeScreen() {
         </div>
         <button
           type="button"
-          onClick={() => createProperty(name || `Property ${properties.length + 1}`, units)}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            createProperty(name || `Property ${properties.length + 1}`, units);
+          }}
           className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-[#b4561d] text-xl font-bold text-white"
         >
           <Plus /> Start property
@@ -605,10 +662,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const step = property.rooms.length === 0 ? 1 : !room ? 2 : 3;
 
   return (
-    <div className="ar-scan-host relative flex h-dvh flex-col bg-[#f6f2e8]">
+    <div className="ar-scan-host relative flex min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-[#f6f2e8]">
       <header
-        className="flex items-center gap-1 border-b border-black/10 bg-white px-2 py-2"
-        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
+        className="flex w-full min-w-0 items-center gap-0.5 overflow-hidden border-b border-black/10 bg-white px-1 py-1"
+        style={{ paddingTop: "max(0.25rem, env(safe-area-inset-top))" }}
       >
         <IconBtn label="Back to properties" onClick={() => openProperty(null)}>
           <ArrowLeft />
@@ -622,7 +679,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             e.target.value !== property.name &&
             change((p) => ({ ...p, name: e.target.value.trim() }))
           }
-          className="h-12 min-w-[9.5rem] flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
+          className="h-12 min-w-0 flex-[1_1_auto] truncate rounded-lg bg-transparent px-1 text-base font-bold"
         />
         <IconBtn
           label="Undo"
@@ -647,7 +704,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         </IconBtn>
       </header>
 
-      <div className="flex items-center gap-2 overflow-x-auto bg-white/70 px-3 py-2 text-sm">
+      <div className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto bg-white/70 px-3 py-2 text-sm">
         {["Add a room", "Capture or draw it", "Name, measure, photo"].map((t, i) => (
           <span
             key={t}
@@ -802,7 +859,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       )}
 
       <div
-        className="grid grid-cols-[1fr_auto_auto] gap-2 border-t border-black/10 bg-white p-3"
+        className="grid w-full min-w-0 max-w-full grid-cols-[1fr_auto_auto] gap-2 overflow-hidden border-t border-black/10 bg-white p-3"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
       >
           <button
@@ -950,11 +1007,11 @@ function AreaBar({
   const s = areaSummary(property);
   const lvl = s.levels.find((l) => l.id === levelId);
   return (
-    <div className="flex min-h-12 items-center gap-2 border-b border-black/10 bg-[#fff8ec] px-3 text-base">
+    <div className="flex min-h-12 w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-b border-black/10 bg-[#fff8ec] px-3 text-base">
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-h-12 flex-1 items-center gap-3 text-left"
+        className="flex min-h-12 min-w-0 flex-1 items-center gap-3 truncate text-left"
         aria-label="Open materials summary"
       >
         {property.levels.length > 1 && lvl && (
@@ -966,14 +1023,14 @@ function AreaBar({
           Total <b>{formatArea(s.total, property.units)}</b>
         </span>
       </button>
-      <button type="button" onClick={onQuote} className="h-10 rounded-full bg-[#b4561d] px-3 text-sm font-semibold text-white">
+      <button type="button" onClick={onQuote} className="h-10 shrink-0 rounded-full bg-[#b4561d] px-3 text-sm font-semibold text-white">
         Quote
       </button>
       <button
         type="button"
         onClick={onSeams}
         aria-pressed={seamsOn}
-        className={`h-10 rounded-full px-3 text-sm font-semibold ${seamsOn ? "bg-black text-white" : "bg-black/5"}`}
+        className={`h-10 shrink-0 rounded-full px-3 text-sm font-semibold ${seamsOn ? "bg-black text-white" : "bg-black/5"}`}
       >
         Seams
       </button>
@@ -1010,7 +1067,7 @@ function LevelBar({ property, levelId }: { property: FieldProperty; levelId: str
   };
   return (
     <div
-      className="flex items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
+      className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
       role="tablist"
       aria-label="Levels"
     >
@@ -1062,7 +1119,7 @@ function IconBtn({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-30"
+      className="flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-30"
     >
       {children}
     </button>

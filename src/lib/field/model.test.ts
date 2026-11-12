@@ -101,6 +101,14 @@ describe("editing walls", () => {
     const bottom = best!.changes.find((c) => c.wall === 2)!;
     assert.ok(Math.abs(bottom.from - 12) < 0.05);
     assert.ok(Math.abs(bottom.to - 13) < 0.05);
+    const lens = edges(best!.points).map((e) => e.length);
+    assert.ok(Math.abs(lens[1] - 12) < 0.01, `side became ${lens[1]}`);
+    assert.ok(Math.abs(lens[3] - 12) < 0.01, `side became ${lens[3]}`);
+    assert.ok(Math.abs(area(best!.points) - 156) < 0.05);
+    assert.equal(
+      best!.changes.some((c) => c.wall === 1 || c.wall === 3),
+      false,
+    );
     assert.equal(best!.changes.some((c) => c.to < 0.5), false);
     assert.equal(squareUp(open, 1, "ft"), null);
     assert.equal(squareUp(open, 3, "ft"), null);
