@@ -434,7 +434,7 @@ export function ArrowSheet({
   };
 
   return (
-    <div className="absolute inset-x-0 bottom-8 z-30 max-h-[68%] overflow-visible rounded-t-2xl border-t border-black/10 bg-[#fbf7ed] pb-1 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
+    <div data-plan-obstacle="draw-pad" className="absolute inset-x-0 bottom-8 z-30 max-h-[68%] overflow-visible rounded-t-2xl border-t border-black/10 bg-[#fbf7ed] pb-1 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
       {(ask || closeBlock || note) && (
         <div className="absolute inset-x-2 bottom-full z-10 mb-2 rounded-xl bg-[#f3dcc3] p-2 shadow">
           {ask ? (

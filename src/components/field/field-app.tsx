@@ -337,6 +337,7 @@ function SelectionBar({
       : "";
   return (
     <div
+      data-plan-obstacle="room-bar"
       className={`z-30 flex flex-col rounded-t-2xl border border-black/10 bg-[#fbf7ed] shadow-[0_-6px_18px_rgba(0,0,0,0.12)] ${open ? "max-h-[52%]" : ""}`}
       style={
         keyboard > 0
@@ -732,7 +733,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <div className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-1rem)]">
+        <div data-plan-obstacle="laser" className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-1rem)]">
             <LaserReadout
               label={
                 laserNote?.label ||
@@ -756,8 +757,6 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           focusWall={focusWall}
           draft={arrowOn ? draft : null}
           draftOrigin={nextRoomOrigin(property.rooms)}
-          bottomChrome={room || stairs ? 104 : 28}
-          padOpen={arrowOn}
           onInteract={() => setLaserNote((n) => (n?.detail?.startsWith("Closed.") ? null : n))}
           onWallTap={(roomId, wall) => {
             select(roomId);
