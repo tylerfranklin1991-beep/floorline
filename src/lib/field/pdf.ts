@@ -12,6 +12,7 @@ import { loadPhotoBlob } from "./photos";
 import { jobSettings } from "./job";
 import { orderLines, roomRows } from "./takeoff";
 import { planFrame, renderPlanSvg } from "./render";
+import { appendCutSheet } from "./cutsheet";
 
 /** Standard drawing scales: [label, paper inches per plan unit]. */
 const FT_SCALES: [string, number][] = [
@@ -154,6 +155,7 @@ export async function buildPdf(full: FieldProperty, opts: PdfOptions = {}): Prom
   }
 
   installerSheet(doc, full, titleBlock, levels.length > 1 ? "All floors" : levels[0].name);
+  appendCutSheet(doc, full);
 
   // Snapshots page.
   const withPhotos = full.rooms.filter((r) => r.photos.length);

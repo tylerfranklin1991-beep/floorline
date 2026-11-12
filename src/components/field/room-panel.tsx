@@ -9,9 +9,12 @@ import {
   edges,
   formatArea,
   formatLength,
+  closureGap,
   parseLength,
   ROOM_PRESETS,
   setWallLength,
+  squareUp,
+  squareUpOptions,
   type FieldProperty,
   type FieldRoom,
 } from "@/lib/field/model";
@@ -24,6 +27,7 @@ import {
   type TransitionType,
 } from "@/lib/field/materials";
 import { PhotoSlots } from "./photo-slots";
+import { HelpMark } from "./tutorials-ui";
 import { AreasSection, FlooringSection } from "./room-flooring";
 
 const WALL_NAMES = (room: FieldRoom) =>
@@ -75,6 +79,80 @@ export function LengthInput({
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       className="h-12 w-28 rounded-xl border border-black/15 bg-white px-3 text-right text-lg font-semibold"
     />
+  );
+}
+
+export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldProperty["units"] }) {
+  const updateRoom = useField((s) => s.updateRoom);
+  const [open, setOpen] = useState(false);
+  const options = squareUpOptions(room.points, units);
+  const [wall, setWall] = useState(() => options[0]?.wall ?? 0);
+  useEffect(() => setWall(squareUpOptions(room.points, units)[0]?.wall ?? 0), [room.id, room.points, units]);
+  const gap = closureGap(room.points);
+  if (gap <= 0.08) return null;
+  const plan = open ? squareUp(room.points, wall, units) : null;
+  return (
+    <div className="border-t border-black/10 px-3 py-2">
+      {!open ? (
+        <button type="button" onClick={() => setOpen(true)} className="h-12 w-full rounded-xl bg-[#b4561d] text-sm font-bold text-white">
+          Square up · gap {formatLength(gap, units)}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          {options.length === 0 ? (
+            <p className="text-sm text-[#8a3b12]">No single wall can close this gap without shrinking under 6".</p>
+          ) : (
+          <label className="block text-sm font-semibold">
+            Wall to adjust
+            <select
+              aria-label="Wall to square up"
+              value={wall}
+              onChange={(e) => setWall(Number(e.target.value))}
+              className="mt-1 h-12 w-full rounded-xl border border-black/15 bg-white px-3 text-base"
+            >
+              {options.map((o) => (
+                <option key={o.wall} value={o.wall}>
+                  Wall {o.wall + 1}
+                  {o.wall === options[0].wall ? " (best)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          )}
+          {plan ? (
+            <ul className="text-sm">
+              {plan.changes.map((c) => (
+                <li key={c.wall}>
+                  Wall {c.wall + 1}: {formatLength(c.from, units)} → {formatLength(c.to, units)}
+                </li>
+              ))}
+              <li>
+                Gap {formatLength(plan.gapBefore, units)} → {formatLength(plan.gapAfter, units)}
+              </li>
+            </ul>
+          ) : (
+            <p className="text-sm text-[#8a3b12]">This wall can't close the gap. Pick another.</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!plan}
+              onClick={() => {
+                if (!plan) return;
+                updateRoom(room.id, { points: plan.points });
+                setOpen(false);
+              }}
+              className="h-12 flex-1 rounded-xl bg-black text-sm font-bold text-white disabled:opacity-40"
+            >
+              Apply
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="h-12 flex-1 rounded-xl bg-black/5 text-sm font-semibold">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -141,9 +219,11 @@ export function RoomPanel({
           aria-label="Room name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onBlur={() =>
-            name.trim() && name !== room.name && updateRoom(room.id, { name: name.trim() })
-          }
+          onBlur={() => {
+            const next = name.trim();
+            if (!next || next === room.name) return;
+            updateRoom(room.id, /bed/i.test(next) ? { name: next, flooring: { ...(room.flooring ?? {}), material: "carpet" } } : { name: next });
+          }}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           className="h-14 w-full rounded-xl border border-black/15 bg-white px-4 text-xl font-semibold"
         />
@@ -152,7 +232,12 @@ export function RoomPanel({
             <button
               key={p}
               type="button"
-              onClick={() => updateRoom(room.id, { name: p })}
+              onClick={() =>
+                updateRoom(
+                  room.id,
+                  /bed/i.test(p) ? { name: p, flooring: { ...(room.flooring ?? {}), material: "carpet" } } : { name: p },
+                )
+              }
               className="h-11 rounded-full bg-black/5 px-4 text-base"
             >
               {p}
@@ -162,10 +247,19 @@ export function RoomPanel({
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-base font-bold">2 · Wall lengths</h3>
+        <h3 className="flex flex-1 items-center gap-2 text-base font-bold">
+          2 · Wall lengths
+          <HelpMark id="edit-walls" label="How to edit a wall length" />
+        </h3>
         <p className="text-sm text-black/55">
-          Type your tape or laser reading. The opposite wall adjusts so the room stays square.
+          Type your tape or laser reading. Only this wall changes — the opposite wall keeps its length.
         </p>
+        {closureGap(room.points) > 0.08 && (
+          <p className="text-sm font-semibold text-[#8a3b12]">
+            Gap {formatLength(closureGap(room.points), u)}. The outline is not square; other walls were not adjusted.
+            Close room in Draw walls snaps an open outline shut.
+          </p>
+        )}
         <div className="space-y-2">
           {edges(room.points).map((e) => (
             <div
@@ -194,7 +288,7 @@ export function RoomPanel({
                 label={`Wall ${e.index + 1} length`}
                 value={e.length}
                 units={u}
-                autoFocus={focusWall === e.index}
+                autoFocus={false}
                 onCommit={(n) => {
                   const next = setWallLength(room.points, e.index, n);
                   if (!next) return false;
@@ -238,7 +332,7 @@ export function RoomPanel({
             key={o.id}
             className="flex flex-wrap items-center gap-2 rounded-xl bg-black/[0.03] p-2"
           >
-            <span className="w-20 text-base font-semibold">{OPENING_LABEL[o.kind]}</span>
+            <span className="w-20 text-base font-semibold">{o.cased ? "Cased opening" : OPENING_LABEL[o.kind]}</span>
             <span className="text-sm text-black/50">wall {o.wall + 1}</span>
             <span className="ml-auto text-sm">width</span>
             <LengthInput
@@ -305,7 +399,10 @@ export function RoomPanel({
       <AreasSection property={property} room={room} />
 
       <section className="space-y-2">
-        <h3 className="text-base font-bold">4 · Photos</h3>
+        <h3 className="flex items-center gap-2 text-base font-bold">
+          4 · Photos
+          <HelpMark id="photos" label="How photos and video work" />
+        </h3>
         <p className="text-sm text-black/55">
           1–2 snapshots so you can tell rooms apart later. They show on the plan.
         </p>

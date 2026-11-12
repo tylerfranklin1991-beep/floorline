@@ -5,7 +5,6 @@ import { jobSettings } from "@/lib/field/job";
 import {
   baseboard,
   boxesFor,
-  carpetLayout,
   formatLinear,
   MATERIAL_LABEL,
   ROLL_WIDTHS_FT,
@@ -27,6 +26,7 @@ import {
   type RoomArea,
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
+import { carpetPlans } from "@/lib/field/tseam";
 
 const chip = (on: boolean) =>
   `h-11 rounded-full px-4 text-base font-semibold ${on ? "bg-[#b4561d] text-white" : "bg-black/5"}`;
@@ -85,7 +85,8 @@ export function FlooringSection({ property, room }: { property: FieldProperty; r
     const { wastePct: _w, ...rest } = room.flooring ?? {};
     updateRoom(room.id, { flooring: rest });
   };
-  const lay = fl.material === "carpet" ? carpetLayout(room, u, fl) : null;
+  const seamPlan =
+    fl.material === "carpet" ? carpetPlans(property).find((p) => p.roomIds.includes(room.id)) : undefined;
   const net = toSqFt(roomArea(room), u);
   const pre = fl.material === "carpet" ? seamPresets(room, fl, u) : null;
   const boxes = boxesFor(net * (1 + fl.wastePct / 100), job.lvpBoxSqFt);
@@ -145,7 +146,7 @@ export function FlooringSection({ property, room }: { property: FieldProperty; r
               </>
             ) : (
               <span className="block text-xs text-black/50">
-                Set box coverage in Job settings to get a box count.
+                Box size not set — using 23.77 sf until you set it in Job settings.
               </span>
             )}
           </div>
@@ -210,18 +211,17 @@ export function FlooringSection({ property, room }: { property: FieldProperty; r
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <NumField label="Trim/end (in)" value={fl.trimIn} onCommit={(n) => setFl({ trimIn: n })} />
           </div>
-          {lay && (
+          {seamPlan && (
             <ul className="rounded-xl bg-black/[0.03] p-2 text-sm" data-testid="room-cuts">
-              {lay.cuts.map((c, i) => (
-                <li key={i}>
-                  Cut {i + 1}: {formatLength(c.length, u)} × {formatLength(c.width, u)}
-                  {c.fill ? " (fill)" : ""}
-                  {c.label ? ` – ${c.label}` : ""}
+              {seamPlan.layout.pieces.map((piece) => (
+                <li key={piece.n}>
+                  #{piece.n} {formatLength(piece.widthFt, "ft")} × {formatLength(piece.cutLengthFt, "ft")}
+                  {piece.fill ? " fill" : ""}
                 </li>
               ))}
               <li className="font-semibold">
-                {lay.seams.length} seam{lay.seams.length === 1 ? "" : "s"} ·{" "}
-                {formatLinear(lay.length, u)} before waste
+                {seamPlan.layout.marks.length} seam{seamPlan.layout.marks.length === 1 ? "" : "s"} ·{" "}
+                {seamPlan.layout.linearFt} lin ft · {seamPlan.layout.sqYd} sq yd
               </li>
             </ul>
           )}

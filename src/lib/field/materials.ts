@@ -51,6 +51,11 @@ export interface RoomFlooring {
   seamOffsetFt: number;
   /** LVP plank direction: 0 = planks run left-right, 90 = up-down. */
   plankDeg: number;
+  /**
+   * Carpet pattern repeat along the pile, inches. 0 (or unset) cross-joins a
+   * fill every roll width. Does not change the plain seam layout.
+   */
+  patternRepeatIn?: number;
 }
 
 export const MATERIAL_LABEL: Record<FloorMaterial, string> = {
@@ -118,6 +123,27 @@ export const roomArea = (r: FieldRoom) => {
   for (const x of r.areas ?? []) a += (x.kind === "add" ? 1 : -1) * x.w * x.l;
   return Math.max(0, a);
 };
+
+/**
+ * Area that counts toward the property total. A closet included in its parent
+ * contributes 0 here and is added onto the parent instead, so it is not counted twice.
+ */
+export function billableArea(p: FieldProperty, room: FieldRoom): number {
+  if (room.closet?.includeInParent) return 0;
+  let a = roomArea(room);
+  if (!room.closet) {
+    for (const c of p.rooms) {
+      if (c.closet?.parentId === room.id && c.closet.includeInParent) a += roomArea(c);
+    }
+  }
+  return Math.max(0, a);
+}
+
+/** Area to show on a room's own line. Closets always show their own square footage. */
+export function listedArea(p: FieldProperty, room: FieldRoom): number {
+  if (room.closet) return roomArea(room);
+  return billableArea(p, room);
+}
 export const excludedArea = (r: FieldRoom) =>
   (r.areas ?? []).filter((x) => x.kind === "exclude").reduce((s, x) => s + x.w * x.l, 0);
 
@@ -143,12 +169,12 @@ export function areaSummary(
     id: r.id,
     name: r.name,
     levelId: r.levelId,
-    area: roomArea(r),
+    area: listedArea(p, r),
   }));
   const levels = p.levels.map((l) => {
     const st = p.stairs.filter((s) => s.levelId === l.id);
     const sa = st.reduce((s, x) => s + stairsArea(x, p.units), 0);
-    const roomsA = rooms.filter((r) => r.levelId === l.id).reduce((s, r) => s + r.area, 0);
+    const roomsA = p.rooms.filter((r) => r.levelId === l.id).reduce((s, r) => s + billableArea(p, r), 0);
     return {
       id: l.id,
       name: l.name,
@@ -528,7 +554,7 @@ export function lvpOrder(p: FieldProperty): LvpOrder {
   for (const r of p.rooms) {
     const f = roomFlooring(r, p.job);
     if (f.material !== "hard") continue;
-    const a = toSqFt(roomArea(r), p.units);
+    const a = toSqFt(billableArea(p, r), p.units);
     sqft += a;
     withWaste += a * (1 + f.wastePct / 100);
   }
@@ -546,7 +572,7 @@ export function padOrder(p: FieldProperty): { sqft: number; sy: number } {
   if (!job.pad) return { sqft: 0, sy: 0 };
   let sqft = 0;
   for (const r of p.rooms)
-    if (roomFlooring(r, p.job).material === "carpet") sqft += toSqFt(roomArea(r), p.units);
+    if (roomFlooring(r, p.job).material === "carpet") sqft += toSqFt(billableArea(p, r), p.units);
   sqft += stairCarpet(p).reduce((s, x) => s + x.sqft, 0);
   return {
     sqft: round2(sqft),
@@ -671,7 +697,7 @@ export function materials(full: FieldProperty, levelId?: string): Materials {
     const bb = f.material === "none" ? 0 : baseboard(p, room);
     return {
       room,
-      area: roomArea(room),
+      area: listedArea(p, room),
       flooring: f,
       baseboard: bb,
       quarterRound: f.quarterRound ? bb : 0,

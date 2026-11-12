@@ -16,6 +16,10 @@ import {
   rectilinearize,
   sanitizeProperty,
   setWallLength,
+  closureGap,
+  squareUp,
+  snapWallLength,
+  polygonsOverlap,
 } from "./model.ts";
 
 describe("rectilinearize", () => {
@@ -72,16 +76,50 @@ describe("rectilinearize", () => {
 });
 
 describe("editing walls", () => {
-  it("setWallLength resizes a rectangle and keeps it rectilinear", () => {
+  it("setWallLength changes only that wall and leaves the opposite wall", () => {
     const pts = rectPoints(0, 0, 10, 8);
     const out = setWallLength(pts, 0, 12.5);
     assert.ok(out);
-    assert.ok(isRectilinear(out!));
     const lens = edges(out!).map((e) => e.length);
-    assert.deepEqual(lens, [12.5, 8, 12.5, 8]);
+    assert.equal(lens[0], 12.5);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[3], 8);
+    assert.ok(lens[1] > 8);
+    assert.equal(area(out!), 90);
+    assert.ok(closureGap(out!) > 2);
+    assert.equal(closureGap(pts), 0);
   });
 
-  it("setWallLength refuses to collapse a wall", () => {
+  it("squareUp on a 12x12 with a 13' top lengthens the parallel wall only", () => {
+    const pts = rectPoints(0, 0, 12, 12);
+    const open = setWallLength(pts, 0, 13)!;
+    assert.ok(Math.abs(closureGap(open) - 1) < 0.15);
+    const best = squareUp(open, undefined, "ft");
+    assert.ok(best);
+    assert.equal(best!.wall, 2);
+    assert.ok(best!.gapAfter < 0.08);
+    const bottom = best!.changes.find((c) => c.wall === 2)!;
+    assert.ok(Math.abs(bottom.from - 12) < 0.05);
+    assert.ok(Math.abs(bottom.to - 13) < 0.05);
+    const lens = edges(best!.points).map((e) => e.length);
+    assert.ok(Math.abs(lens[1] - 12) < 0.01, `side became ${lens[1]}`);
+    assert.ok(Math.abs(lens[3] - 12) < 0.01, `side became ${lens[3]}`);
+    assert.ok(Math.abs(area(best!.points) - 156) < 0.05);
+    assert.equal(
+      best!.changes.some((c) => c.wall === 1 || c.wall === 3),
+      false,
+    );
+    assert.equal(best!.changes.some((c) => c.to < 0.5), false);
+    assert.equal(squareUp(open, 1, "ft"), null);
+    assert.equal(squareUp(open, 3, "ft"), null);
+  });
+
+  it("snapWallLength lands on half inches", () => {
+    assert.equal(snapWallLength(10.04, "ft", 0.5), 10 + 0.5 / 12);
+    assert.equal(snapWallLength(10.02, "ft", 1), 10);
+  });
+
+  it("setWallLength on an L-shape does not move the far walls", () => {
     const L = [
       { x: 0, y: 0 },
       { x: 10, y: 0 },
@@ -90,7 +128,13 @@ describe("editing walls", () => {
       { x: 5, y: 10 },
       { x: 0, y: 10 },
     ];
-    assert.equal(setWallLength(L, 2, 10), null);
+    const out = setWallLength(L, 2, 10);
+    assert.ok(out);
+    const lens = edges(out!).map((e) => e.length);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[4], 5);
+    assert.equal(lens[5], 10);
+    assert.equal(setWallLength(L, 2, 0), null);
   });
 
   it("moveCorner drags adjacent walls", () => {
@@ -178,5 +222,15 @@ describe("lengths", () => {
     });
     assert.equal(ok?.rooms.length, 0);
     assert.equal(ok?.openings.length, 0);
+  });
+});
+
+describe("room overlap", () => {
+  it("warns when one room sits inside another, and not when they only share a wall", () => {
+    const outer = rectPoints(0, 0, 20, 20);
+    const inner = rectPoints(4, 4, 6, 6);
+    const beside = rectPoints(20, 0, 10, 10);
+    assert.equal(polygonsOverlap(outer, inner), true);
+    assert.equal(polygonsOverlap(outer, beside), false);
   });
 });
