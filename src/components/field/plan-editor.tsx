@@ -868,12 +868,18 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {view.scale >= 14 && edges(room.points).map((e) => {
+                {(room.id === selectedRoomId || view.scale >= 14) && edges(room.points).map((e) => {
                   const L = e.length || 1;
                   const nx = -(e.b.y - e.a.y) / L;
                   const ny = (e.b.x - e.a.x) / L;
-                  const tx = (e.a.x + e.b.x) / 2 + nx * px(30);
-                  const ty = (e.a.y + e.b.y) / 2 + ny * px(30);
+                  const rawX = (e.a.x + e.b.x) / 2 + nx * px(22);
+                  const rawY = (e.a.y + e.b.y) / 2 + ny * px(22);
+                  const sx = view.tx + rawX * view.scale;
+                  const sy = view.ty + rawY * view.scale;
+                  const clampedX = Math.min(Math.max(sx, 36), Math.max(36, size.w - 36));
+                  const clampedY = Math.min(Math.max(sy, 52), Math.max(52, size.h - 20));
+                  const tx = (clampedX - view.tx) / view.scale;
+                  const ty = (clampedY - view.ty) / view.scale;
                   const label = formatLength(e.length, property.units);
                   const bw = px(label.length * 7.5 + 14);
                   const bh = px(22);

@@ -189,11 +189,49 @@ function finishChain(draft: Draft, chain: Pt[], error: number): ShotResult {
   };
 }
 
+/** Why Close room must refuse, or null when the chain can become a room. */
+export function closeBlockReason(draft: Draft): string | null {
+  if (draft.closetChain) {
+    if (draft.closetChain.length < 3) return "Need at least three corners before closing the closet.";
+    return null;
+  }
+  const chain = draft.points;
+  if (chain.length < 3) return "Need at least three corners before closing.";
+  if (!isSimple(chain)) {
+    return "This outline crosses itself, so it can't be a room. Undo the last wall, or discard the draft.";
+  }
+  if (area(chain) < 1e-4) return "That outline has no area. Undo the last wall, or discard the draft.";
+  return null;
+}
+
 /** Close the open chain with a button. The error is the square-close miss, not the straight line back to the start. */
 export function closeDraft(draft: Draft): ShotResult {
+  const blocked = closeBlockReason(draft);
+  if (blocked) return { ok: false, reason: blocked };
   const chain = draft.closetChain ?? draft.points;
-  if (chain.length < 3) return { ok: false, reason: "Need at least three corners before closing." };
   return finishChain(draft, chain, closureGap(chain));
+}
+
+/** Heading of the step from a to b. 0° is up the page. */
+export function headingBetween(a: Pt, b: Pt): number {
+  return normalizeDeg((Math.atan2(b.x - a.x, -(b.y - a.y)) * 180) / Math.PI);
+}
+
+/**
+ * A draft saved as one snapshot (after a relaunch) becomes one undo step per wall,
+ * so Undo can walk back through the walls that were already there.
+ */
+export function restoreDraftHistory(saved: Draft): History<Draft> {
+  const points = saved.points?.length ? saved.points : [{ x: 0, y: 0 }];
+  const present: Draft = { ...blankDraft(saved.headingDeg), ...saved, points };
+  if (points.length <= 1) return initHistory(present);
+  const past: Draft[] = [];
+  for (let n = 1; n < points.length; n++) {
+    const slice = points.slice(0, n);
+    const headingDeg = n >= 2 ? headingBetween(slice[n - 2], slice[n - 1]) : present.headingDeg;
+    past.push({ ...blankDraft(headingDeg), headingDeg, points: slice });
+  }
+  return { past, present, future: [] };
 }
 
 export type OpeningInput = {

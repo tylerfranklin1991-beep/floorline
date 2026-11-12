@@ -1,16 +1,15 @@
 import { Ruler, X } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import { initHistory } from "@/lib/field/history";
 import {
   HEADINGS,
   addOpening,
   closetRectangle,
   closeDraft,
   commitDraft,
-  currentWall,
   draftHistory,
   previewEnd,
   pushDraft,
+  restoreDraftHistory,
   shoot,
   shootMeters,
   startClosetChain,
@@ -276,7 +275,7 @@ export function ArrowSheet({
     try {
       const raw = localStorage.getItem(draftKey);
       const saved = raw ? (JSON.parse(raw) as Draft) : null;
-      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) return initHistory(saved);
+      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) return restoreDraftHistory(saved);
     } catch {
       /* ignore a bad save */
     }
@@ -286,6 +285,8 @@ export function ArrowSheet({
   const [name, setName] = useState(defaultName);
   const [lengthText, setLengthText] = useState("");
   const [note, setNote] = useState<string | null>(null);
+  const [closeBlock, setCloseBlock] = useState<string | null>(null);
+  const [ask, setAsk] = useState<null | "x" | "discard">(null);
   const [panel, setPanel] = useState<"pad" | "opening" | "closet">("pad");
   const [arm, setArm] = useState<Arm>("wall");
   const [kind, setKind] = useState<DraftOpening["kind"]>("door");
@@ -295,7 +296,6 @@ export function ArrowSheet({
   const [cWidth, setCWidth] = useState("");
   const [cDepth, setCDepth] = useState("");
   const [outward, setOutward] = useState(true);
-  const [mockText, setMockText] = useState("");
   const histRef = useRef(hist);
   histRef.current = hist;
   const draft = hist.present;
@@ -315,6 +315,7 @@ export function ArrowSheet({
     if (draft.points.length > 1) onDraftRef.current(overlayOf(draft));
     if (!draftKey) return;
     if (draft.points.length > 1 && !draft.roomClosed) localStorage.setItem(draftKey, JSON.stringify(draft));
+    else localStorage.removeItem(draftKey);
   }, [draft, draftKey]);
 
   const take = (result: ShotResult, committedName = name) => {
@@ -332,9 +333,7 @@ export function ArrowSheet({
         ids: (prefix) => uid(prefix),
       });
       if (!done.ok) {
-        setNote(done.reason);
-        setHist(pushDraft(histRef.current, result.draft));
-        publish(result.draft);
+        setCloseBlock(done.reason);
         return;
       }
       onCommit(done.committed);
@@ -406,51 +405,122 @@ export function ArrowSheet({
       setNote(`Couldn't read "${lengthText}". Try 12'6" or 3.2`);
       return;
     }
+    setCloseBlock(null);
     take(shoot(draft, n, units));
     setLengthText("");
   };
 
-  const wall = currentWall(draft.closetChain ?? draft.points);
+  const discardDraft = () => {
+    if (draftKey) localStorage.removeItem(draftKey);
+    const fresh = draftHistory(draft.headingDeg);
+    setHist(fresh);
+    publish(fresh.present);
+    setAsk(null);
+    setCloseBlock(null);
+    onClose();
+  };
+
+  const tryClose = () => {
+    const result = closeDraft(draft);
+    if (!result.ok) {
+      setCloseBlock(result.reason);
+      return;
+    }
+    setCloseBlock(null);
+    take(result);
+  };
+
   const chain = draft.closetChain ?? draft.points;
 
+  const setHeading = (deg: number) => {
+    const next = { ...draft, headingDeg: ((deg % 360) + 360) % 360 };
+    setHist({ ...hist, present: next });
+    publish(next);
+  };
+
   return (
-    <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)] ${compact ? "max-h-16" : "max-h-[40%]"}`}>
-      <header className="flex items-center gap-2 border-b border-black/10 bg-white px-3 py-2">
-        <button type="button" aria-label={compact ? "Show drawing pad" : "Hide drawing pad"} onClick={() => setCompact((v) => !v)} className="flex size-12 items-center justify-center rounded-full bg-black/5 text-xl">
+    <div className="absolute inset-x-0 bottom-0 z-30 max-h-[68%] overflow-hidden border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
+      <header className="flex items-center gap-1 bg-white px-2 py-1">
+        <button type="button" aria-label={compact ? "Show drawing pad" : "Hide drawing pad"} onClick={() => setCompact((v) => !v)} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-black/5 text-lg">
           {compact ? "▴" : "▾"}
         </button>
-        <h2 className="flex-1 text-lg font-bold">{draft.closetChain ? "Closet" : "Draw with laser"}</h2>
+        <input
+          aria-label="Room name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="h-10 min-w-0 flex-1 rounded-xl bg-black/5 px-2 text-base font-bold"
+        />
+        <span className="shrink-0 text-xs font-semibold text-black/50">{Math.max(0, chain.length - 1)}w</span>
         <HelpMark
           id={panel === "opening" ? "add-opening" : panel === "closet" || draft.closetChain ? "add-closet" : "draw-walls"}
           label="How this drawing step works"
         />
-        <button type="button" onClick={() => undoRef.current?.()} disabled={hist.past.length === 0} className="h-11 rounded-full bg-black/5 px-3 text-sm font-semibold disabled:opacity-40">
+        <button type="button" onClick={() => undoRef.current?.()} disabled={hist.past.length === 0} className="h-10 shrink-0 rounded-full bg-black/5 px-3 text-sm font-semibold disabled:opacity-40">
           Undo
         </button>
-        <button type="button" aria-label="Close draw with laser" onClick={onClose} className="flex size-12 items-center justify-center rounded-full bg-black/5">
+        <button type="button" aria-label="Close draw with laser" onClick={() => setAsk("x")} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-black/5">
           <X />
         </button>
       </header>
-      <div className="min-h-0 space-y-3 overflow-y-auto p-3">
-        {note && <p className="rounded-xl bg-[#f3dcc3] px-3 py-2 text-sm font-semibold">{note}</p>}
-        <div className="flex items-center gap-2">
-          <input
-            aria-label="Room name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="h-11 min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 text-base font-semibold"
-          />
-          <span className="text-sm text-black/50">{chain.length - 1} walls</span>
-        </div>
+      {!compact && (
+      <div className={panel === "pad" ? "space-y-1.5 overflow-hidden px-2 pb-2 pt-1.5" : "max-h-[46vh] space-y-3 overflow-y-auto p-3"}>
+        {ask && (
+          <div className="flex items-center gap-2 rounded-xl bg-[#f3dcc3] p-2">
+            <p className="min-w-0 flex-1 text-sm font-semibold">
+              {ask === "x" ? "Keep this draft, or discard it?" : "Discard this drawing?"}
+            </p>
+            {ask === "x" ? (
+              <button type="button" onClick={() => { setAsk(null); onClose(); }} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
+                Keep draft
+              </button>
+            ) : (
+              <button type="button" onClick={() => setAsk(null)} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
+                Cancel
+              </button>
+            )}
+            <button type="button" onClick={discardDraft} className="h-11 shrink-0 rounded-xl bg-black px-3 text-sm font-bold text-white">
+              Discard
+            </button>
+          </div>
+        )}
+        {note && !closeBlock && <p className="rounded-xl bg-[#f3dcc3] px-3 py-1.5 text-sm font-semibold">{note}</p>}
         {panel === "pad" && (
           <>
-            <div className="grid grid-cols-3 gap-1.5">
+            {closeBlock && (
+              <div className="rounded-xl bg-[#f3dcc3] p-2">
+                <p className="text-sm font-semibold">{closeBlock}</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      undoRef.current?.();
+                      setCloseBlock(null);
+                    }}
+                    className="h-11 rounded-xl bg-white text-sm font-bold"
+                  >
+                    Undo last wall
+                  </button>
+                  <button type="button" onClick={() => setAsk("discard")} className="h-11 rounded-xl bg-black text-sm font-bold text-white">
+                    Discard draft
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-2">
               {(["up-left", "up", "up-right", "left", "center", "right", "down-left", "down", "down-right"] as const).map((id) => {
                 if (id === "center") {
                   return (
-                    <div key="center" className="flex items-center justify-center rounded-xl bg-black/5 text-xs font-semibold text-black/60">
-                      {Math.round(draft.headingDeg)}°
-                    </div>
+                    <input
+                      key="center"
+                      aria-label="Custom wall angle in degrees clockwise from up"
+                      inputMode="decimal"
+                      value={String(Math.round(draft.headingDeg))}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n)) setHeading(n);
+                      }}
+                      className="h-11 rounded-2xl bg-black/5 text-center text-base font-bold"
+                    />
                   );
                 }
                 const heading = HEADINGS.find((h) => h.id === id)!;
@@ -461,37 +531,14 @@ export function ArrowSheet({
                     type="button"
                     aria-label={heading.label}
                     aria-pressed={on}
-                    onClick={() => {
-                      const next = { ...draft, headingDeg: heading.deg };
-                      setHist({ ...hist, present: next });
-                      publish(next);
-                    }}
-                    className={`h-12 rounded-xl text-xl font-bold ${on ? "bg-[#b4561d] text-white" : "bg-white"}`}
+                    onClick={() => setHeading(heading.deg)}
+                    className={`h-11 rounded-2xl text-xl font-bold ${on ? "bg-[#b4561d] text-white" : "bg-white"}`}
                   >
                     {heading.arrow}
                   </button>
                 );
               })}
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              Custom angle
-              <input
-                aria-label="Custom wall angle in degrees clockwise from up"
-                type="number"
-                inputMode="decimal"
-                value={String(draft.headingDeg)}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  if (!Number.isFinite(n)) return;
-                  const deg = ((n % 360) + 360) % 360;
-                  const next = { ...draft, headingDeg: deg };
-                  setHist({ ...hist, present: next });
-                  publish(next);
-                }}
-                className="h-11 w-24 rounded-xl border border-black/15 bg-white px-2 text-base"
-              />
-              <span className="text-black/50">° clockwise from up</span>
-            </label>
             <form
               className="flex gap-2"
               onSubmit={(e) => {
@@ -500,64 +547,50 @@ export function ArrowSheet({
               }}
             >
               <input
-                aria-label="Wall length"
+                aria-label={disto.mock ? "Simulated DISTO shot" : "Wall length"}
                 value={lengthText}
                 onChange={(e) => setLengthText(e.target.value)}
-                placeholder={units === "ft" ? `12'6"` : "3.80"}
-                className="h-12 min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 text-lg"
+                placeholder={disto.mock ? "12'6\" or DISTO shot" : units === "ft" ? `12'6"` : "3.80"}
+                className="h-11 min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 text-base"
               />
-              <button type="submit" className="h-12 rounded-xl bg-black px-4 text-base font-bold text-white">
+              <button type="submit" className="h-11 shrink-0 rounded-xl bg-black px-3 text-sm font-bold text-white">
                 Add wall
               </button>
-            </form>
-            {disto.mock && (
-              <form
-                className="flex gap-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const n = parseLength(mockText, units);
-                  if (n == null) {
-                    setNote("Couldn't read that simulated reading.");
-                    return;
-                  }
-                  const err = publishMockMeters(planToMeters(n, units));
-                  if (err) setNote(err);
-                  setMockText("");
-                }}
-              >
-                <input
-                  aria-label="Simulated DISTO shot"
-                  value={mockText}
-                  onChange={(e) => setMockText(e.target.value)}
-                  placeholder="Simulate DISTO shot"
-                  className="h-12 min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3"
-                />
-                <button type="submit" className="h-12 rounded-xl bg-[#b4561d] px-3 text-sm font-bold text-white">
+              {disto.mock && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = parseLength(lengthText, units);
+                    if (n == null) {
+                      setNote("Couldn't read that simulated reading.");
+                      return;
+                    }
+                    const err = publishMockMeters(planToMeters(n, units));
+                    if (err) setNote(err);
+                    else setLengthText("");
+                  }}
+                  className="h-11 shrink-0 rounded-xl bg-[#b4561d] px-3 text-sm font-bold text-white"
+                >
                   Shoot
                 </button>
-              </form>
-            )}
+              )}
+            </form>
             <div className="grid grid-cols-3 gap-2">
-              <button type="button" onClick={() => { setPanel("opening"); setArm("open-width"); }} className="h-12 rounded-xl bg-white text-sm font-semibold">
+              <button type="button" onClick={() => { setPanel("opening"); setArm("open-width"); setCloseBlock(null); }} className="h-11 rounded-xl bg-white text-sm font-semibold">
                 Add opening
               </button>
-              <button type="button" onClick={() => { setPanel("closet"); setArm("closet-width"); }} className="h-12 rounded-xl bg-white text-sm font-semibold">
+              <button type="button" onClick={() => { setPanel("closet"); setArm("closet-width"); setCloseBlock(null); }} className="h-11 rounded-xl bg-white text-sm font-semibold">
                 Add closet
               </button>
-              <button
-                type="button"
-                onClick={() => take(closeDraft(draft))}
-                className="h-12 rounded-xl bg-[#b4561d] text-sm font-bold text-white"
-              >
+              <button type="button" onClick={tryClose} className="h-11 rounded-xl bg-[#b4561d] text-sm font-bold text-white">
                 Close room
               </button>
             </div>
-            <p className="text-sm text-black/55">
-              {wall
-                ? `Current wall ${wall.index + 1} is ${formatLength(wall.length, units)}. Press DIST to add the next wall ${HEADINGS.find((h) => h.deg === Math.round(draft.headingDeg))?.label.toLowerCase() || "on this angle"}.`
-                : "Pick a direction, then press DIST or type the first wall."}{" "}
-              The room closes by itself when a shot lands within {units === "ft" ? "6 inches" : "15 cm"} of the start.
-            </p>
+            {!closeBlock && (
+              <button type="button" onClick={() => setAsk("discard")} className="h-10 w-full rounded-xl text-sm font-semibold text-[#8a3b12]">
+                Discard draft
+              </button>
+            )}
           </>
         )}
         {panel === "opening" && (
@@ -648,6 +681,7 @@ export function ArrowSheet({
           />
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -787,6 +787,35 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             Cancel
           </button>
         )}
+        {arrowOn && (
+          <ArrowSheet
+            units={property.units}
+            levelId={levelId}
+            origin={nextRoomOrigin(property.rooms)}
+            defaultName={nextName()}
+            undoRef={arrowUndoRef}
+            readingRef={arrowReadRef}
+            storageId={full.id}
+            onDraft={setDraft}
+            onCommit={(committed) => {
+              change((p) => ({
+                ...p,
+                rooms: [...p.rooms, committed.room, ...committed.closets],
+                openings: [...p.openings, ...committed.openings],
+              }));
+              select(committed.room.id);
+              setFocusWall(0);
+              const gap = formatLength(committed.closingError, property.units);
+              setLaserNote({
+                label: committed.room.name,
+                detail: `Closed. Gap to the start was ${gap}.`,
+                reshoot: false,
+              });
+              toast.success(`${committed.room.name} closed · gap ${gap}`);
+            }}
+            onClose={() => setArrowOn(false)}
+          />
+        )}
         {(stairs || room) && mode === "select" && (
           <SelectionBar
             property={property}
@@ -828,36 +857,6 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           }}
         />
       )}
-      {arrowOn && (
-        <ArrowSheet
-          units={property.units}
-          levelId={levelId}
-          origin={nextRoomOrigin(property.rooms)}
-          defaultName={nextName()}
-          undoRef={arrowUndoRef}
-          readingRef={arrowReadRef}
-          storageId={full.id}
-          onDraft={setDraft}
-          onCommit={(committed) => {
-            change((p) => ({
-              ...p,
-              rooms: [...p.rooms, committed.room, ...committed.closets],
-              openings: [...p.openings, ...committed.openings],
-            }));
-            select(committed.room.id);
-            setFocusWall(0);
-            const gap = formatLength(committed.closingError, property.units);
-            setLaserNote({
-              label: committed.room.name,
-              detail: `Closed. Gap to the start was ${gap}.`,
-              reshoot: false,
-            });
-            toast.success(`${committed.room.name} closed · gap ${gap}`);
-          }}
-          onClose={() => setArrowOn(false)}
-        />
-      )}
-
       <div
         className="grid w-full min-w-0 max-w-full grid-cols-[1fr_auto_auto] gap-2 overflow-hidden border-t border-black/10 bg-white p-3"
         style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}

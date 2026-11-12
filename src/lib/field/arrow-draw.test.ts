@@ -8,6 +8,7 @@ import {
   closetRectangle,
   closetRectPoints,
   closeDraft,
+  restoreDraftHistory,
   commitDraft,
   directionVector,
   draftHistory,
@@ -95,6 +96,43 @@ test("close room reports the square-close gap, not the straight line home", () =
   if (closed.event !== "closed") return;
   near(closed.closingError, 0.5);
   assert.equal(formatLength(closed.closingError, "ft"), `0'-6"`);
+  assert.equal(`Closed. Gap ${formatLength(closed.closingError, "ft")}.`, `Closed. Gap 0'-6".`);
+});
+
+test("close room explains a self-crossing outline instead of closing it", () => {
+  let d = { ...blankDraft(90), headingDeg: 90 };
+  d = must(shoot(d, 10, "ft")).draft;
+  d = { ...d, headingDeg: 180 };
+  d = must(shoot(d, 10, "ft")).draft;
+  d = { ...d, headingDeg: 270 };
+  d = must(shoot(d, 10, "ft")).draft;
+  d = { ...d, headingDeg: 0 };
+  d = must(shoot(d, 4, "ft")).draft;
+  d = { ...d, headingDeg: 90 };
+  d = must(shoot(d, 12, "ft")).draft;
+  const closed = closeDraft(d);
+  assert.equal(closed.ok, false);
+  if (closed.ok) return;
+  assert.match(closed.reason, /crosses itself/);
+});
+
+test("a restored draft can be undone one wall at a time", () => {
+  let d = { ...blankDraft(90), headingDeg: 90 };
+  d = must(shoot(d, 12, "ft")).draft;
+  d = { ...d, headingDeg: 180 };
+  d = must(shoot(d, 10, "ft")).draft;
+  d = { ...d, headingDeg: 270 };
+  d = must(shoot(d, 11.5, "ft")).draft;
+  const hist = restoreDraftHistory(d);
+  assert.equal(hist.present.points.length, 4);
+  assert.equal(hist.past.length, 3);
+  const once = undoDraft(hist);
+  assert.equal(once.present.points.length, 3);
+  const twice = undoDraft(once);
+  assert.equal(twice.present.points.length, 2);
+  const thrice = undoDraft(twice);
+  assert.equal(thrice.present.points.length, 1);
+  assert.equal(undoDraft(thrice).present.points.length, 1);
 });
 
 test("custom 30° segment and a DISTO float both extend the chain", () => {
