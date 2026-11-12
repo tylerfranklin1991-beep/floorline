@@ -19,6 +19,7 @@ import {
   closureGap,
   squareUp,
   snapWallLength,
+  polygonsOverlap,
 } from "./model.ts";
 
 describe("rectilinearize", () => {
@@ -213,5 +214,15 @@ describe("lengths", () => {
     });
     assert.equal(ok?.rooms.length, 0);
     assert.equal(ok?.openings.length, 0);
+  });
+});
+
+describe("room overlap", () => {
+  it("warns when one room sits inside another, and not when they only share a wall", () => {
+    const outer = rectPoints(0, 0, 20, 20);
+    const inner = rectPoints(4, 4, 6, 6);
+    const beside = rectPoints(20, 0, 10, 10);
+    assert.equal(polygonsOverlap(outer, inner), true);
+    assert.equal(polygonsOverlap(outer, beside), false);
   });
 });
