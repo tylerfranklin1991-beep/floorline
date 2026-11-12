@@ -1,5 +1,6 @@
 import { Ruler, X } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { initHistory } from "@/lib/field/history";
 import {
   HEADINGS,
   addOpening,
@@ -254,6 +255,7 @@ export function ArrowSheet({
   onDraft,
   onCommit,
   onClose,
+  storageId,
 }: {
   units: Units;
   levelId: string;
@@ -264,9 +266,23 @@ export function ArrowSheet({
   onDraft: (draft: PlanDraft | null) => void;
   onCommit: (committed: CommittedOutline) => void;
   onClose: () => void;
+  /** Keeps an unfinished draw-walls chain across leaving the screen. */
+  storageId?: string;
 }) {
   const disto = useDisto();
-  const [hist, setHist] = useState(() => draftHistory(0));
+  const draftKey = storageId ? `floorline.draw-draft.${storageId}` : "";
+  const [hist, setHist] = useState(() => {
+    if (!draftKey) return draftHistory(0);
+    try {
+      const raw = localStorage.getItem(draftKey);
+      const saved = raw ? (JSON.parse(raw) as Draft) : null;
+      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) return initHistory(saved);
+    } catch {
+      /* ignore a bad save */
+    }
+    return draftHistory(0);
+  });
+  const [compact, setCompact] = useState(false);
   const [name, setName] = useState(defaultName);
   const [lengthText, setLengthText] = useState("");
   const [note, setNote] = useState<string | null>(null);
@@ -295,12 +311,19 @@ export function ArrowSheet({
     onDraft(overlayOf(next));
   };
 
+  useEffect(() => {
+    if (draft.points.length > 1) onDraftRef.current(overlayOf(draft));
+    if (!draftKey) return;
+    if (draft.points.length > 1 && !draft.roomClosed) localStorage.setItem(draftKey, JSON.stringify(draft));
+  }, [draft, draftKey]);
+
   const take = (result: ShotResult, committedName = name) => {
     if (!result.ok) {
       setNote(result.reason);
       return;
     }
     if (result.event === "closed" && result.draft.roomClosed && !result.draft.closetChain) {
+      if (draftKey) localStorage.removeItem(draftKey);
       const done = commitDraft(result.draft, {
         name: committedName.trim() || "Room",
         levelId,
@@ -391,8 +414,11 @@ export function ArrowSheet({
   const chain = draft.closetChain ?? draft.points;
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex max-h-[58%] flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]">
+    <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)] ${compact ? "max-h-16" : "max-h-[40%]"}`}>
       <header className="flex items-center gap-2 border-b border-black/10 bg-white px-3 py-2">
+        <button type="button" aria-label={compact ? "Show drawing pad" : "Hide drawing pad"} onClick={() => setCompact((v) => !v)} className="flex size-12 items-center justify-center rounded-full bg-black/5 text-xl">
+          {compact ? "▴" : "▾"}
+        </button>
         <h2 className="flex-1 text-lg font-bold">{draft.closetChain ? "Closet" : "Draw with laser"}</h2>
         <HelpMark
           id={panel === "opening" ? "add-opening" : panel === "closet" || draft.closetChain ? "add-closet" : "draw-walls"}

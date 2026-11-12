@@ -15,6 +15,7 @@ import {
   takeQuoteNumber,
   freshQuote,
   parseQuote,
+  planStamp,
   validThrough,
   type BusinessProfile,
   type PriceBook,
@@ -22,7 +23,7 @@ import {
   type SavedQuote,
 } from "@/lib/field/quote";
 import { useField } from "@/lib/field/store";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { HelpMark } from "./tutorials-ui";
 
@@ -52,8 +53,7 @@ function Field({
 }
 
 export function QuoteSheet({ property, onClose }: { property: FieldProperty; onClose: () => void }) {
-  const change = useField((s) => s.change);
-  useBackClose(true, onClose);
+  const preview = useField((s) => s.preview);
   const [book, setBook] = useState<PriceBook>(() => loadBook());
   const [business, setBusiness] = useState<BusinessProfile>(() => loadBusiness());
   const [showBiz, setShowBiz] = useState(false);
@@ -87,22 +87,34 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
     });
   };
 
-  const saveOnJob = () => {
-    change((p) => ({
+  const saveOnJob = (q = quote) => {
+    preview((p) => ({
       ...p,
-      address: quote.address,
-      quote,
-      job: { ...jobSettings(p.job), customer: quote.customer },
+      address: q.address,
+      quote: q,
+      job: { ...jobSettings(p.job), customer: q.customer },
     }));
     writeBook({
       ...book,
-      markupPct: quote.markupPct,
-      taxPct: quote.taxPct,
-      discount: quote.discount,
-      depositPct: quote.depositPct,
-      validDays: quote.validDays,
+      markupPct: q.markupPct,
+      taxPct: q.taxPct,
+      discount: q.discount,
+      depositPct: q.depositPct,
+      validDays: q.validDays,
     });
   };
+  const quoteRef = useRef(quote);
+  quoteRef.current = quote;
+  useEffect(() => {
+    saveOnJob(quoteRef.current);
+    // saveOnJob is recreated every render; listing it would write the job on every paint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote]);
+  const closeSaved = () => {
+    saveOnJob(quoteRef.current);
+    onClose();
+  };
+  useBackClose(true, closeSaved);
 
   const share = async () => {
     setBusy(true);
@@ -118,7 +130,7 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40" onClick={closeSaved}>
       <div
         role="dialog"
         aria-label="Customer quote"
@@ -129,7 +141,7 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
         <div className="mb-3 flex items-center gap-2">
           <h2 className="flex-1 text-2xl font-bold">Quote</h2>
           <HelpMark id="quote" />
-          <button type="button" aria-label="Close" onClick={() => { saveOnJob(); onClose(); }} className="flex size-12 items-center justify-center rounded-full bg-black/5 text-2xl">
+          <button type="button" aria-label="Close" onClick={closeSaved} className="flex size-12 items-center justify-center rounded-full bg-black/5 text-2xl">
             ×
           </button>
         </div>
@@ -138,6 +150,24 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
           <p className="mb-3 rounded-2xl bg-[#fff8ec] p-3 text-sm">
             Your price list is empty. Type a price on each line — it is saved and used on the next quote. Nothing is filled in for you.
           </p>
+        )}
+        {quote.planStamp && quote.planStamp !== planStamp(property) && (
+          <div className="mb-3 rounded-2xl bg-[#f3dcc3] p-3 text-sm">
+            <p className="font-semibold">Plan changed — this quote still lists the previous rooms.</p>
+            <button
+              type="button"
+              className="mt-2 h-11 w-full rounded-xl bg-black text-sm font-bold text-white"
+              onClick={() =>
+                setQuote((q) => ({
+                  ...q,
+                  lines: refreshLines(property, q.lines, book.rates),
+                  planStamp: planStamp(property),
+                }))
+              }
+            >
+              Update from plan
+            </button>
+          </div>
         )}
 
         <button type="button" onClick={() => setShowBiz((v) => !v)} className="mb-3 flex h-12 w-full items-center gap-3 rounded-xl bg-black/5 px-3 text-left">
@@ -209,7 +239,7 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
                 <button
                   type="button"
                   aria-label={`Remove ${l.label}`}
-                  className="text-lg leading-none text-black/40"
+                  className="flex size-11 shrink-0 items-center justify-center rounded-full text-lg text-black/40"
                   onClick={() =>
                     setQuote((q) => ({
                       ...q,
@@ -292,7 +322,13 @@ export function QuoteSheet({ property, onClose }: { property: FieldProperty; onC
           <button
             type="button"
             className="h-12 rounded-xl bg-black/5 text-sm font-semibold"
-            onClick={() => setQuote((q) => ({ ...q, lines: refreshLines(property, q.lines, book.rates) }))}
+            onClick={() =>
+              setQuote((q) => ({
+                ...q,
+                lines: refreshLines(property, q.lines, book.rates),
+                planStamp: planStamp(property),
+              }))
+            }
           >
             Update from plan
           </button>

@@ -600,25 +600,32 @@ export function setWallLength(points: Pt[], index: number, length: number): Pt[]
   return next;
 }
 
+/** Nearest axis (0/90/180/270). No slack: a wall a few degrees off still counts as that axis. */
+function axisUnit(dx: number, dy: number): Pt {
+  const ang = Math.atan2(dy, dx);
+  const snapped = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2);
+  return { x: Math.cos(snapped), y: Math.sin(snapped) };
+}
+
 /**
- * How far the outline misses a square close. Axis-aligned walls are walked on
- * their axis; a wall already diagonal keeps its real direction. A rectangle
- * reports 0. After one wall is lengthened on its own, this is the gap arrow
- * mode would show instead of stretching the opposite wall.
+ * How far the walls miss a square close. Every wall is walked on its nearest
+ * axis at its real length. A closed rectangle is 0. A 13' top against a 12'
+ * bottom is 1', even if the joining wall has tilted.
  */
 export function closureGap(points: Pt[]): number {
-  if (points.length < 3) return 0;
+  const g = closureVector(points);
+  return round2(Math.hypot(g.x, g.y));
+}
+
+function closureVector(points: Pt[]): Pt {
   let x = 0;
   let y = 0;
   for (const e of edges(points)) {
-    const ang = Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x);
-    const step = Math.PI / 2;
-    const snapped = Math.round(ang / step) * step;
-    const use = Math.abs(ang - snapped) < (22 * Math.PI) / 180 ? snapped : ang;
-    x += Math.cos(use) * e.length;
-    y += Math.sin(use) * e.length;
+    const u = axisUnit(e.b.x - e.a.x, e.b.y - e.a.y);
+    x += u.x * e.length;
+    y += u.y * e.length;
   }
-  return round2(Math.hypot(x, y));
+  return { x, y };
 }
 
 /** Nearest ½" or 1" (feet), or the same distance in metres. */
@@ -647,58 +654,82 @@ export function setWallSnapInches(n: 0.5 | 1) {
 }
 
 export type SquareUpChange = { wall: number; from: number; to: number };
+export type SquareUpPlan = {
+  wall: number;
+  points: Pt[];
+  changes: SquareUpChange[];
+  gapBefore: number;
+  gapAfter: number;
+};
 
 /**
- * Close the gap by changing one wall's length (its end corner only).
- * The next wall can change because it shares that corner; every other
- * wall keeps its length. `changes` lists both so nothing is silent.
+ * Ways to close the gap by changing one wall's length along its own axis.
+ * Other walls keep their axis and their length. Results that leave a gap,
+ * shrink a wall under 6", or reverse a wall are left out. Lengthening the
+ * short side comes before shortening the long side.
  */
-export function squareUp(
-  points: Pt[],
-  wall: number,
-): { points: Pt[]; changes: SquareUpChange[]; gapBefore: number; gapAfter: number } | null {
+export function squareUpOptions(points: Pt[], units: Units = "ft"): SquareUpPlan[] {
   const n = points.length;
-  if (wall < 0 || wall >= n || n < 3) return null;
-  const before = edges(points).map((e) => e.length);
-  const gapBefore = closureGap(points);
-  const span = Math.max(gapBefore * 4, before[wall], 1);
-  const lo = 0.15;
-  const hi = before[wall] + span;
-  let bestLen = before[wall];
-  let bestGap = gapBefore;
-  let bestPts: Pt[] = points;
-  const consider = (len: number) => {
-    const pts = setWallLength(points, wall, len);
-    if (!pts) return;
-    const g = closureGap(pts);
-    const closer = g < bestGap - 0.005;
-    const same = Math.abs(g - bestGap) <= 0.005 && Math.abs(len - before[wall]) < Math.abs(bestLen - before[wall]);
-    if (closer || same) {
-      bestGap = g;
-      bestLen = len;
-      bestPts = pts;
-    }
-  };
-  for (let i = 0; i <= 64; i++) consider(lo + ((hi - lo) * i) / 64);
-  let left = Math.max(lo, bestLen - span / 10);
-  let right = bestLen + span / 10;
-  for (let k = 0; k < 18; k++) {
-    const m1 = left + (right - left) / 3;
-    const m2 = right - (right - left) / 3;
-    const p1 = setWallLength(points, wall, m1);
-    const p2 = setWallLength(points, wall, m2);
-    const g1 = p1 ? closureGap(p1) : Infinity;
-    const g2 = p2 ? closureGap(p2) : Infinity;
-    if (g1 < g2) right = m2;
-    else left = m1;
+  if (n < 3) return [];
+  const es = edges(points);
+  const walk = es.map((e) => ({ u: axisUnit(e.b.x - e.a.x, e.b.y - e.a.y), len: e.length }));
+  let gx = 0;
+  let gy = 0;
+  for (const w of walk) {
+    gx += w.u.x * w.len;
+    gy += w.u.y * w.len;
   }
-  consider((left + right) / 2);
-  if (bestGap > gapBefore - 0.04) return null;
-  const after = edges(bestPts).map((e) => e.length);
-  const changes = after
-    .map((to, i) => ({ wall: i, from: round2(before[i]), to: round2(to) }))
-    .filter((c) => Math.abs(c.to - c.from) > 0.02);
-  return { points: bestPts, changes, gapBefore: round2(gapBefore), gapAfter: round2(bestGap) };
+  const gapBefore = Math.hypot(gx, gy);
+  if (gapBefore < 0.04) return [];
+  const minLen = units === "ft" ? 0.5 : 0.1524;
+  const out: SquareUpPlan[] = [];
+  for (let i = 0; i < n; i++) {
+    const u = walk[i].u;
+    const delta = -(gx * u.x + gy * u.y);
+    const newLen = walk[i].len + delta;
+    if (!(newLen >= minLen)) continue;
+    const rx = gx + u.x * delta;
+    const ry = gy + u.y * delta;
+    if (Math.hypot(rx, ry) > 0.08) continue;
+    const nextWalk = walk.map((w, k) => (k === i ? { ...w, len: newLen } : w));
+    const pts: Pt[] = [{ x: points[0].x, y: points[0].y }];
+    let p = pts[0];
+    for (let k = 0; k < n - 1; k++) {
+      p = {
+        x: Math.round((p.x + nextWalk[k].u.x * nextWalk[k].len) * 10000) / 10000,
+        y: Math.round((p.y + nextWalk[k].u.y * nextWalk[k].len) * 10000) / 10000,
+      };
+      pts.push(p);
+    }
+    if (edges(pts).some((e) => e.length < minLen - 0.01)) continue;
+    const before = es.map((e) => e.length);
+    const after = edges(pts).map((e) => e.length);
+    const changes = after
+      .map((to, k) => ({ wall: k, from: round2(before[k]), to: round2(to) }))
+      .filter((c) => Math.abs(c.to - c.from) > 0.04);
+    out.push({
+      wall: i,
+      points: pts,
+      changes,
+      gapBefore: round2(gapBefore),
+      gapAfter: round2(Math.hypot(rx, ry)),
+    });
+  }
+  out.sort((a, b) => {
+    const da = (a.changes.find((c) => c.wall === a.wall)?.to ?? 0) - (a.changes.find((c) => c.wall === a.wall)?.from ?? 0);
+    const db = (b.changes.find((c) => c.wall === b.wall)?.to ?? 0) - (b.changes.find((c) => c.wall === b.wall)?.from ?? 0);
+    if (da > 0 !== db > 0) return da > 0 ? -1 : 1;
+    return Math.abs(da) - Math.abs(db);
+  });
+  return out;
+}
+
+/** The preferred square-up, or the chosen wall when it is a valid close. */
+export function squareUp(points: Pt[], wall?: number, units: Units = "ft"): SquareUpPlan | null {
+  const options = squareUpOptions(points, units);
+  if (!options.length) return null;
+  if (wall == null) return options[0];
+  return options.find((o) => o.wall === wall) ?? null;
 }
 
 /** Move corner k, dragging its two walls with it so the outline stays rectilinear. */
@@ -741,6 +772,20 @@ function segmentsCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt): boolean {
     ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) &&
     ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9))
   );
+}
+
+/** True when two room outlines cross or one sits inside the other. Shared corners do not count. */
+export function polygonsOverlap(a: Pt[], b: Pt[]): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  if (a.some((p) => pointInPolygon(p, b)) || b.some((p) => pointInPolygon(p, a))) return true;
+  const ea = edges(a);
+  const eb = edges(b);
+  for (const x of ea) {
+    for (const y of eb) {
+      if (segmentsCross(x.a, x.b, y.a, y.b)) return true;
+    }
+  }
+  return false;
 }
 
 /** True when no two non-adjacent walls cross. */

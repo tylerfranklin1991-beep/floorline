@@ -79,6 +79,8 @@ export interface SavedQuote {
   depositPct: number;
   notes: string;
   signature: string;
+  /** Rooms and shapes this quote was built from. */
+  planStamp?: string;
 }
 
 export const EMPTY_RATES: PriceRates = {
@@ -391,6 +393,15 @@ function today(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+export function planStamp(p: FieldProperty): string {
+  return p.rooms
+    .map(
+      (r) =>
+        `${r.id}:${r.name}:${r.flooring?.material ?? ""}:${r.points.map((q) => `${q.x.toFixed(2)},${q.y.toFixed(2)}`).join(" ")}`,
+    )
+    .join("|");
+}
+
 export function freshQuote(p: FieldProperty, book: PriceBook, number: string): SavedQuote {
   const job = jobSettings(p.job);
   return {
@@ -406,6 +417,7 @@ export function freshQuote(p: FieldProperty, book: PriceBook, number: string): S
     depositPct: book.depositPct,
     notes: book.terms,
     signature: "",
+    planStamp: planStamp(p),
   };
 }
 
@@ -440,6 +452,7 @@ export function parseQuote(value: unknown, p: FieldProperty, book: PriceBook): S
     depositPct: num(v.depositPct, book.depositPct, 0, 100),
     notes: str(v.notes, book.terms),
     signature: str(v.signature),
+    planStamp: str(v.planStamp, base.planStamp ?? ""),
   };
 }
 

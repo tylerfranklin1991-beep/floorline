@@ -259,11 +259,16 @@ export const useField = create<FieldState>()(
             : (p0?.levels[0]?.id ?? room.levelId);
           room = { ...room, levelId };
           // New rooms get the job's default material (LVP unless changed).
-          if (!room.flooring?.material && p0)
-            room = {
-              ...room,
-              flooring: { ...(room.flooring ?? {}), material: jobSettings(p0.job).defaultMaterial },
-            };
+            if (!room.flooring?.material && p0) {
+              const namedBed = /bed/i.test(room.name);
+              room = {
+                ...room,
+                flooring: {
+                  ...(room.flooring ?? {}),
+                  material: namedBed ? "carpet" : jobSettings(p0.job).defaultMaterial,
+                },
+              };
+            }
           get().change((p) => ({ ...p, rooms: [...p.rooms, room] }));
           set({ selectedRoomId: room.id, selectedOpeningId: null });
         },

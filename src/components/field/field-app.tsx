@@ -38,6 +38,7 @@ import {
   nextRoomOrigin,
   newRoom,
   parseLength,
+  polygonsOverlap,
   rectilinearize,
   rectPoints,
   closureGap,
@@ -341,6 +342,12 @@ function SelectionBar({
         )}
       </div>
       {room && <SquareUpButton room={room} units={property.units} />}
+      {room &&
+        property.rooms.some((other) => other.id !== room.id && polygonsOverlap(room.points, other.points)) && (
+          <p className="px-3 pb-2 text-sm font-semibold text-[#8a3b12]">
+            This room overlaps another. Square footage may be counted twice.
+          </p>
+        )}
       {room && edge && (
         <div className="flex items-center gap-2 px-3 pb-2 text-xs font-semibold text-black/60">
           <span>Drag snap</span>
@@ -403,6 +410,15 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [drawName, setDrawName] = useState<string | null>(null);
   const [laserOpen, setLaserOpen] = useState(false);
   const [arrowOn, setArrowOn] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`floorline.draw-draft.${full.id}`);
+      const saved = raw ? (JSON.parse(raw) as { points?: unknown[]; roomClosed?: boolean }) : null;
+      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) setArrowOn(true);
+    } catch {
+      /* ignore a bad save */
+    }
+  }, [full.id]);
   const [draft, setDraft] = useState<PlanDraft | null>(null);
   const [laserNote, setLaserNote] = useState<{ label: string; detail: string; reshoot: boolean } | null>(null);
   const arrowUndoRef = useRef<(() => boolean) | null>(null);
@@ -606,7 +622,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             e.target.value !== property.name &&
             change((p) => ({ ...p, name: e.target.value.trim() }))
           }
-          className="h-12 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
+          className="h-12 min-w-[9.5rem] flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
         />
         <IconBtn
           label="Undo"
@@ -697,6 +713,15 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         )}
         {showSeams && <SeamDock property={full} onClose={() => setShowSeams(false)} />}
         {mode !== "select" && (
+          <div className="pointer-events-none absolute inset-x-3 top-12 z-10 rounded-2xl bg-black/85 px-4 py-3 text-base font-semibold text-white">
+            {mode === "draw"
+              ? `Drag on the grid to draw ${drawName ?? "a room"}`
+              : mode === "stairs"
+                ? "Tap where the stairs go"
+                : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
+          </div>
+        )}
+        {mode !== "select" && (
           <button
             type="button"
             onClick={() => setMode("select")}
@@ -754,6 +779,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           defaultName={nextName()}
           undoRef={arrowUndoRef}
           readingRef={arrowReadRef}
+          storageId={full.id}
           onDraft={setDraft}
           onCommit={(committed) => {
             change((p) => ({
@@ -892,7 +918,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <WelcomeTip
           onStart={() => {
             dismissWelcome();
-            openHelp("getting-started");
+            openHelp("draw-room");
           }}
           onDismiss={() => {
             dismissWelcome();
