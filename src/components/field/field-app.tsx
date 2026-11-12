@@ -23,15 +23,19 @@ import {
   RectangleVertical,
   MapPin,
   Camera,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { isArSupported } from "@/lib/field/ar";
 import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
   area,
   bbox,
+  edges,
   formatArea,
+  formatLength,
   gridStep,
   levelView,
   nearestWall,
@@ -39,11 +43,16 @@ import {
   nextRoomOrigin,
   newRoom,
   parseLength,
+  polygonsOverlap,
   rectilinearize,
   rectPoints,
+  closureGap,
   ensureClockwise,
   lShapePoints,
   ROOM_PRESETS,
+  setWallLength,
+  wallSnapInches,
+  setWallSnapInches,
   translate,
   uid,
   type FieldOpening,
@@ -60,14 +69,22 @@ import { CalibrateSheet, PhotoShape, SketchImport, TracePanel } from "./sketch-t
 import { installBackHandler, useBackClose } from "@/lib/field/back";
 import { formatGeo, mapsUrl } from "@/lib/field/media";
 import { MaterialsScreen } from "./materials-screen";
+import { QuoteSheet } from "./quote-sheet";
+import { SeamDock } from "./seam-dock";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
 import { areaSummary } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
-import { RoomPanel } from "./room-panel";
+import { RoomPanel, LengthInput, SquareUpButton } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
 import { WalkCapture } from "./walk-capture";
 import { WalkMode, type WalkRoom } from "./walk-mode";
+import { ArrowSheet, LaserButton, LaserReadout, LaserSheet, type PlanDraft } from "./laser-controls";
+import { HelpButton, HelpMark, TutorialHost, WelcomeTip } from "./tutorials-ui";
+import { dismissWelcome, welcomePending } from "@/lib/field/tutorials";
+import { advanceLaserTarget } from "@/lib/field/arrow-draw";
+import { autoReconnect, onDistoReading, useDisto } from "@/lib/field/disto-link";
+import { metersToPlan } from "@/lib/field/disto-protocol";
 
 let lastSaveToast = 0;
 setOnSaveError(() => {
@@ -78,7 +95,51 @@ setOnSaveError(() => {
   );
 });
 
+/** The document itself never scrolls. The keyboard can pan a WebView and leave it there. */
+function useDocumentScrollLock() {
+  useEffect(() => {
+    const root = document.documentElement;
+    const reset = () => {
+      window.scrollTo(0, 0);
+      root.scrollLeft = 0;
+      root.scrollTop = 0;
+      document.body.scrollLeft = 0;
+      document.body.scrollTop = 0;
+    };
+    const fit = () => {
+      const vv = window.visualViewport;
+      const h = vv?.height ?? window.innerHeight;
+      root.style.setProperty("--app-height", `${Math.round(h)}px`);
+      const keyboard = vv ? window.innerHeight - vv.height > 80 : false;
+      if (!keyboard) reset();
+    };
+    fit();
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", fit);
+    vv?.addEventListener("scroll", fit);
+    const onHide = () => {
+      window.setTimeout(reset, 0);
+      window.setTimeout(reset, 80);
+      window.setTimeout(reset, 320);
+    };
+    window.addEventListener("focusout", onHide);
+    const keyboard = (
+      window as unknown as {
+        Capacitor?: { Plugins?: { Keyboard?: { addListener?: (ev: string, cb: () => void) => { remove: () => void } } } };
+      }
+    ).Capacitor?.Plugins?.Keyboard;
+    const hideHandle = keyboard?.addListener?.("keyboardDidHide", onHide);
+    return () => {
+      vv?.removeEventListener("resize", fit);
+      vv?.removeEventListener("scroll", fit);
+      window.removeEventListener("focusout", onHide);
+      hideHandle?.remove();
+    };
+  }, []);
+}
+
 export function FieldApp() {
+  useDocumentScrollLock();
   const property = useCurrentProperty();
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
@@ -95,9 +156,19 @@ export function FieldApp() {
     if (useField.persist.hasHydrated()) setHydrated(true);
     return useField.persist.onFinishHydration(() => setHydrated(true));
   }, []);
+  const shell = "fixed inset-0 flex w-full max-w-full flex-col overflow-hidden bg-[#f6f2e8]";
+  const shellStyle = { height: "var(--app-height, 100dvh)" };
   if (!hydrated)
-    return <div className="flex h-dvh items-center justify-center text-lg">Loading…</div>;
-  return property ? <PropertyScreen property={property} /> : <HomeScreen />;
+    return (
+      <div className={`${shell} items-center justify-center text-lg`} style={shellStyle}>
+        Loading…
+      </div>
+    );
+  return (
+    <div className={shell} style={shellStyle}>
+      {property ? <PropertyScreen property={property} /> : <HomeScreen />}
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------------- home */
@@ -114,7 +185,7 @@ function HomeScreen() {
 
   return (
     <div
-      className="mx-auto min-h-dvh max-w-xl space-y-6 p-5"
+      className="mx-auto min-h-0 w-full max-w-xl flex-1 space-y-6 overflow-y-auto p-5"
       style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
     >
       <header>
@@ -149,7 +220,10 @@ function HomeScreen() {
         </div>
         <button
           type="button"
-          onClick={() => createProperty(name || `Property ${properties.length + 1}`, units)}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            createProperty(name || `Property ${properties.length + 1}`, units);
+          }}
           className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-[#b4561d] text-xl font-bold text-white"
         >
           <Plus /> Start property
@@ -225,6 +299,156 @@ function HomeScreen() {
 
 /* ------------------------------------------------------------ property */
 
+/* ------------------------------------------------------------ property */
+
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const covered = window.innerHeight - vv.height - vv.offsetTop;
+      setInset(covered > 80 ? Math.round(covered) : 0);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, []);
+  return inset;
+}
+
+/** Compact room bar. It overlays the plan, so opening it does not resize the canvas. */
+function SelectionBar({
+  property,
+  room,
+  stairs,
+  open,
+  focusWall,
+  keyboard,
+  onOpenChange,
+  children,
+}: {
+  property: FieldProperty;
+  room: FieldRoom | null;
+  stairs: FieldProperty["stairs"][number] | null;
+  open: boolean;
+  focusWall: number | null;
+  keyboard: number;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  const updateRoom = useField((s) => s.updateRoom);
+  const startY = useRef(0);
+  const dragged = useRef(false);
+  const [snap, setSnap] = useState<0.5 | 1>(() => wallSnapInches());
+  const edge = room && focusWall != null ? edges(room.points)[focusWall] : undefined;
+  const title = stairs ? "Stairs" : (room?.name ?? "Room");
+  const detail = stairs
+    ? stairs.steps
+      ? `${stairs.steps} steps`
+      : ""
+    : room
+      ? formatArea(area(room.points), property.units)
+      : "";
+  return (
+    <div
+      data-plan-obstacle="room-bar"
+      className={`z-30 flex flex-col rounded-t-2xl border border-black/10 bg-[#fbf7ed] shadow-[0_-6px_18px_rgba(0,0,0,0.12)] ${open ? "max-h-[52%]" : ""}`}
+      style={
+        keyboard > 0
+          ? { position: "fixed", left: 8, right: 8, bottom: keyboard + 8 }
+          : { position: "absolute", left: 8, right: 8, bottom: 8 }
+      }
+      role="dialog"
+      aria-label={open ? "Room menu" : "Room"}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      <div className="flex min-h-14 items-center gap-1 pr-2">
+        <button
+          type="button"
+          aria-label={open ? "Collapse room menu" : "Expand room menu"}
+          className="flex min-h-14 min-w-0 flex-1 items-center gap-1 px-1 text-left"
+          onPointerDown={(e) => {
+            startY.current = e.clientY;
+            dragged.current = false;
+          }}
+          onPointerMove={(e) => {
+            if (Math.abs(e.clientY - startY.current) > 10) dragged.current = true;
+          }}
+          onPointerUp={(e) => {
+            const dy = e.clientY - startY.current;
+            if (dy < -28) onOpenChange(true);
+            else if (dy > 28) onOpenChange(false);
+          }}
+          onClick={() => {
+            if (dragged.current) return;
+            onOpenChange(!open);
+          }}
+        >
+          {open ? <ChevronDown className="size-7 shrink-0" /> : <ChevronUp className="size-7 shrink-0" />}
+          <span className="min-w-0">
+            <span className="block truncate text-lg font-bold leading-tight">{title}</span>
+            {detail && <span className="block text-sm text-black/55">{detail}</span>}
+          </span>
+        </button>
+        {!open && edge && room && (
+          <LengthInput
+            label={`Wall ${edge.index + 1} length`}
+            value={edge.length}
+            units={property.units}
+            onCommit={(n) => {
+              const next = setWallLength(room.points, edge.index, n);
+              if (!next) return false;
+              updateRoom(room.id, { points: next });
+              return true;
+            }}
+          />
+        )}
+        {open && (
+          <button
+            type="button"
+            className="h-12 shrink-0 rounded-full bg-black px-4 text-sm font-bold text-white"
+            onClick={() => onOpenChange(false)}
+          >
+            Done
+          </button>
+        )}
+      </div>
+      {room && <SquareUpButton room={room} units={property.units} />}
+      {room &&
+        property.rooms.some((other) => other.id !== room.id && polygonsOverlap(room.points, other.points)) && (
+          <p className="px-3 pb-2 text-sm font-semibold text-[#8a3b12]">
+            This room overlaps another. Square footage may be counted twice.
+          </p>
+        )}
+      {room && edge && (
+        <div className="flex items-center gap-2 px-3 pb-2 text-xs font-semibold text-black/60">
+          <span>Drag snap</span>
+          {([0.5, 1] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-pressed={snap === n}
+              onClick={() => {
+                setWallSnapInches(n);
+                setSnap(n);
+              }}
+              className={`h-9 rounded-full px-3 ${snap === n ? "bg-black text-white" : "bg-black/5"}`}
+            >
+              {n === 0.5 ? "½\"" : "1\""}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && <div className="min-h-0 overflow-y-auto overscroll-contain border-t border-black/10">{children}</div>}
+    </div>
+  );
+}
+
 type Capture = null | { kind: "ar" | "walk" | "walkmode"; name: string };
 
 function PropertyScreen({ property: full }: { property: FieldProperty }) {
@@ -256,14 +480,66 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [menu, setMenu] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
   const [showMaterials, setShowMaterials] = useState(false);
+  const [showQuote, setShowQuote] = useState(false);
+  const [showSeams, setShowSeams] = useState(false);
   const [openingPick, setOpeningPick] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const keyboard = useKeyboardInset();
   const [fitNonce, setFitNonce] = useState(0);
   const [drawName, setDrawName] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState<string | null>(null);
   const [cal, setCal] = useState<{ a: Pt; b: Pt } | null>(null);
+  const [laserOpen, setLaserOpen] = useState(false);
+  const [arrowOn, setArrowOn] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`floorline.draw-draft.${full.id}`);
+      const saved = raw ? (JSON.parse(raw) as { points?: unknown[]; roomClosed?: boolean }) : null;
+      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) setArrowOn(true);
+    } catch {
+      /* ignore a bad save */
+    }
+  }, [full.id]);
+  const [draft, setDraft] = useState<PlanDraft | null>(null);
+  const [laserNote, setLaserNote] = useState<{ label: string; detail: string; reshoot: boolean } | null>(null);
+  useEffect(() => {
+    if (!laserNote?.detail?.startsWith("Closed.")) return;
+    const t = window.setTimeout(() => setLaserNote(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [laserNote]);
+  const arrowUndoRef = useRef<(() => boolean) | null>(null);
+  const arrowReadRef = useRef<((meters: number) => boolean) | null>(null);
+  const focusRef = useRef<number | null>(null);
+  const levelRef = useRef(levelId);
+  const arrowOnRef = useRef(arrowOn);
+  const lastShot = useRef<{ roomId: string; wall: number; before: Pt[]; after: Pt[] } | null>(null);
+  focusRef.current = focusWall;
+  levelRef.current = levelId;
+  arrowOnRef.current = arrowOn;
+  const disto = useDisto();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState(false);
+  const openHelp = (id?: string) => {
+    setHelpTopic(id ?? null);
+    setHelpOpen(true);
+    setWelcome(false);
+  };
+  const openHelpRef = useRef(openHelp);
+  openHelpRef.current = openHelp;
+  useEffect(() => {
+    const onHelp = (e: Event) => openHelpRef.current(String((e as CustomEvent<string>).detail));
+    const onWelcome = () => setWelcome(true);
+    window.addEventListener("floorline-help", onHelp);
+    window.addEventListener("floorline-welcome", onWelcome);
+    if (welcomePending()) setWelcome(true);
+    return () => {
+      window.removeEventListener("floorline-help", onHelp);
+      window.removeEventListener("floorline-welcome", onWelcome);
+    };
+  }, []);
   const room = property.rooms.find((r) => r.id === selectedRoomId) ?? null;
 
   // Android back: close the top-most thing first (registration order = stacking order).
@@ -282,8 +558,74 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     setTraceOpen(false);
     setMode("select");
   });
+  useBackClose(laserOpen, () => setLaserOpen(false));
+  useBackClose(arrowOn, () => setArrowOn(false));
+  useBackClose(welcome, () => {
+    dismissWelcome();
+    setWelcome(false);
+  });
+  useBackClose(helpOpen, () => setHelpOpen(false));
 
-  useEffect(() => setCollapsed(false), [selectedRoomId, selectedStairsId]);
+  useEffect(() => {
+    void autoReconnect();
+  }, []);
+
+  useEffect(() => {
+    return onDistoReading((meters) => {
+      if (arrowOnRef.current && arrowReadRef.current?.(meters)) return;
+      const st = useField.getState();
+      const prop = st.properties.find((p) => p.id === st.currentId);
+      const units = prop?.units ?? "ft";
+      const label = formatLength(metersToPlan(meters, units), units);
+      const roomId = st.selectedRoomId;
+      const wall = focusRef.current;
+      if (!prop || roomId == null || wall == null) {
+        setLaserNote({ label, detail: "Tap a wall, then shoot again.", reshoot: false });
+        return;
+      }
+      const target = prop.rooms.find((r) => r.id === roomId);
+      if (!target) return;
+      const length = metersToPlan(meters, units);
+      const next = setWallLength(target.points, wall, length);
+      if (!next) {
+        setLaserNote({ label, detail: "That length would fold the room.", reshoot: false });
+        return;
+      }
+      lastShot.current = { roomId, wall, before: target.points, after: next };
+      st.updateRoom(roomId, { points: next });
+      setMenuOpen(false);
+      const gap = closureGap(next);
+      const gapNote = gap > 0.08 ? ` · gap ${formatLength(gap, units)}` : "";
+      const rooms = prop.rooms
+        .filter((r) => r.levelId === (levelRef.current || prop.levels[0]?.id))
+        .map((r) => ({ id: r.id, wallCount: r.points.length }));
+      const adv = advanceLaserTarget(rooms, roomId, wall);
+      if (adv) {
+        st.select(adv.roomId);
+        setFocusWall(adv.wall);
+        setLaserNote({ label, detail: `Wall ${wall + 1} set${gapNote} · next is wall ${adv.wall + 1}`, reshoot: true });
+      } else {
+        setFocusWall(wall);
+        setLaserNote({ label, detail: `Wall ${wall + 1} set${gapNote} · last wall on this floor`, reshoot: true });
+      }
+    });
+  }, []);
+
+  const reshoot = () => {
+    const shot = lastShot.current;
+    if (!shot) return;
+    const st = useField.getState();
+    const prop = st.properties.find((p) => p.id === st.currentId);
+    const target = prop?.rooms.find((r) => r.id === shot.roomId);
+    const same =
+      target &&
+      target.points.length === shot.after.length &&
+      target.points.every((p, i) => p.x === shot.after[i].x && p.y === shot.after[i].y);
+    if (same) st.updateRoom(shot.roomId, { points: shot.before });
+    st.select(shot.roomId);
+    setFocusWall(shot.wall);
+    setLaserNote((n) => (n ? { ...n, detail: "Ready — press DIST to re-shoot.", reshoot: false } : n));
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -399,10 +741,10 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   };
 
   return (
-    <div className="flex h-dvh flex-col bg-[#f6f2e8]">
+    <div className="relative flex min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-[#f6f2e8]">
       <header
-        className="flex items-center gap-1 border-b border-black/10 bg-white px-2 py-2"
-        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
+        className="flex w-full min-w-0 items-center gap-0.5 overflow-hidden border-b border-black/10 bg-white px-1 py-1"
+        style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
       >
         <IconBtn label="Back to properties" onClick={() => openProperty(null)}>
           <ArrowLeft />
@@ -416,9 +758,16 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             e.target.value !== property.name &&
             change((p) => ({ ...p, name: e.target.value.trim() }))
           }
-          className="h-12 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
+          className="h-12 min-w-0 flex-[1_1_auto] truncate rounded-lg bg-transparent px-1 text-base font-bold"
         />
-        <IconBtn label="Undo" onClick={undo} disabled={!canUndo}>
+        <IconBtn
+          label="Undo"
+          onClick={() => {
+            if (arrowUndoRef.current?.()) return;
+            undo();
+          }}
+          disabled={!canUndo && !arrowOn}
+        >
           <Undo2 />
         </IconBtn>
         <IconBtn label="Redo" onClick={redo} disabled={!canRedo}>
@@ -427,6 +776,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <IconBtn label="Job settings" onClick={() => setJobOpen(true)}>
           <Settings2 />
         </IconBtn>
+        <LaserButton onClick={() => { setArrowOn(false); setLaserOpen((open) => !open); }} />
+        <HelpButton onClick={() => openHelp()} />
       </header>
 
       <LevelBar property={full} levelId={levelId} onTrace={() => setTraceOpen(true)} />
@@ -435,20 +786,42 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         property={full}
         levelId={levelId}
         onOpen={() => setShowMaterials(true)}
+        onQuote={() => setShowQuote(true)}
+        onSeams={() => setShowSeams((v) => !v)}
+        seamsOn={showSeams}
         onUnits={() => setUnits(property.units === "ft" ? "m" : "ft")}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
+        <div data-plan-obstacle="laser" className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-1rem)]">
+            <LaserReadout
+              label={
+                laserNote?.label ||
+                (disto.last ? formatLength(metersToPlan(disto.last.meters, property.units), property.units) : disto.status === "connected" ? disto.name || "DISTO" : "Laser")
+              }
+              detail={laserNote?.detail ?? null}
+              onReshoot={laserNote?.reshoot ? reshoot : null}
+            />
+        </div>
         <PlanEditor
           property={property}
           mode={mode}
+          seamEdit={showSeams}
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
+          focusWall={focusWall}
+          draft={arrowOn ? draft : null}
+          draftOrigin={nextRoomOrigin(property.rooms)}
+          onInteract={() => setLaserNote((n) => (n?.detail?.startsWith("Closed.") ? null : n))}
           onWallTap={(roomId, wall) => {
             select(roomId);
             setFocusWall(wall);
           }}
+          onRoomTap={(id) => {
+            if (id) setFocusWall(null);
+          }}
+          onSuppressMenu={() => setMenuOpen(false)}
           onOpeningTap={() => setFocusWall(null)}
           onCalibrate={(a, b) => {
             setMode("select");
@@ -463,8 +836,9 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             Tap any room, wall length or door to edit it.
           </div>
         )}
+        {showSeams && <SeamDock property={full} onClose={() => setShowSeams(false)} />}
         {mode !== "select" && (
-          <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
+          <div className="absolute inset-x-3 top-12 z-10 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
             <span className="flex-1">{MODE_HINT[mode]}</span>
             <button
               type="button"
@@ -490,66 +864,78 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             />
           </div>
         )}
+        {arrowOn && (
+          <ArrowSheet
+            units={property.units}
+            levelId={levelId}
+            origin={nextRoomOrigin(property.rooms)}
+            defaultName={nextName()}
+            undoRef={arrowUndoRef}
+            readingRef={arrowReadRef}
+            storageId={full.id}
+            onDraft={setDraft}
+            onCommit={(committed) => {
+              change((p) => ({
+                ...p,
+                rooms: [...p.rooms, committed.room, ...committed.closets],
+                openings: [...p.openings, ...committed.openings],
+              }));
+              select(committed.room.id);
+              setFocusWall(0);
+              setLaserNote({
+                label: committed.room.name,
+                detail: `Closed. ${committed.closeText}.`,
+                reshoot: false,
+              });
+            }}
+            onClose={() => setArrowOn(false)}
+          />
+        )}
         {(stairs || room) && mode === "select" && (
-          <div
-            className="absolute inset-x-0 bottom-0 z-20 flex max-h-[68%] flex-col rounded-t-3xl border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.15)]"
-            role="dialog"
-            aria-label="Inspector"
+          <SelectionBar
+            property={property}
+            room={room}
+            stairs={stairs}
+            open={menuOpen}
+            focusWall={focusWall}
+            keyboard={keyboard}
+            onOpenChange={setMenuOpen}
           >
-            <button
-              type="button"
-              aria-label={collapsed ? "Expand inspector" : "Collapse inspector"}
-              onClick={() => setCollapsed((c) => !c)}
-              className="flex h-8 w-full shrink-0 items-center justify-center"
-            >
-              <span className="h-1.5 w-12 rounded-full bg-black/25" />
-            </button>
-            {collapsed ? (
-              <div className="flex items-center gap-2 px-4 pb-3">
-                <button
-                  type="button"
-                  onClick={() => setCollapsed(false)}
-                  className="h-12 flex-1 text-left text-lg font-bold"
-                >
-                  {stairs ? "Stairs" : room!.name} · <span className="font-normal">tap to edit</span>
-                </button>
-                {room && !stairs && (
-                  <button
-                    type="button"
-                    onClick={nextRoom}
-                    className="h-12 rounded-full bg-[#b4561d] px-5 text-base font-bold text-white"
-                  >
-                    Next room →
-                  </button>
-                )}
-              </div>
+            {stairs ? (
+              <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
             ) : (
-              <div className="min-h-0 overflow-y-auto overscroll-contain">
-                {stairs ? (
-                  <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
-                ) : (
-                  <RoomPanel
-                    property={property}
-                    room={room!}
-                    focusWall={focusWall}
-                    selectedOpeningId={selectedOpeningId}
-                    onPlace={(k) => setMode(k)}
-                    onNext={nextRoom}
-                    onClose={() => {
-                      select(null);
-                      setFocusWall(null);
-                    }}
-                    onViewPhoto={(photoId) => setPhoto({ roomId: room!.id, photoId })}
-                  />
-                )}
-              </div>
+              <RoomPanel
+                property={property}
+                room={room!}
+                focusWall={focusWall}
+                selectedOpeningId={selectedOpeningId}
+                onPlace={(k) => setMode(k)}
+                onNext={nextRoom}
+                onClose={() => {
+                  select(null);
+                  setFocusWall(null);
+                }}
+                onViewPhoto={(photoId) => setPhoto({ roomId: room!.id, photoId })}
+              />
             )}
-          </div>
+          </SelectionBar>
         )}
       </div>
 
+      {laserOpen && !arrowOn && (
+        <LaserSheet
+          units={property.units}
+          onClose={() => setLaserOpen(false)}
+          onDraw={() => {
+            setLaserOpen(false);
+            select(null);
+            setFocusWall(null);
+            setArrowOn(true);
+          }}
+        />
+      )}
       <nav
-        className="grid grid-cols-6 gap-1 border-t border-black/10 bg-white px-1 pt-1"
+        className="grid w-full min-w-0 max-w-full grid-cols-6 gap-1 overflow-hidden border-t border-black/10 bg-white px-1 pt-1"
         style={{ paddingBottom: "max(0.25rem, env(safe-area-inset-bottom))" }}
         aria-label="Tools"
       >
@@ -693,6 +1079,20 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {photo && <PhotoViewer property={property} {...photo} onClose={() => setPhoto(null)} />}
       {menu && <ExportSheet property={full} onClose={() => setMenu(false)} />}
       {showMaterials && <MaterialsScreen property={full} onClose={() => setShowMaterials(false)} />}
+      {showQuote && <QuoteSheet property={full} onClose={() => setShowQuote(false)} />}
+      {welcome && !helpOpen && (
+        <WelcomeTip
+          onStart={() => {
+            dismissWelcome();
+            openHelp("draw-room");
+          }}
+          onDismiss={() => {
+            dismissWelcome();
+            setWelcome(false);
+          }}
+        />
+      )}
+      {helpOpen && <TutorialHost app="beta" topic={helpTopic} onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
@@ -728,21 +1128,27 @@ function AreaBar({
   property,
   levelId,
   onOpen,
+  onQuote,
+  onSeams,
+  seamsOn,
   onUnits,
 }: {
   property: FieldProperty;
   levelId: string;
   onOpen: () => void;
+  onQuote: () => void;
+  onSeams: () => void;
+  seamsOn: boolean;
   onUnits: () => void;
 }) {
   const s = areaSummary(property);
   const lvl = s.levels.find((l) => l.id === levelId);
   return (
-    <div className="flex min-h-12 items-center gap-2 border-b border-black/10 bg-[#fff8ec] px-3 text-base">
+    <div className="flex min-h-12 w-full min-w-0 max-w-full items-center gap-2 overflow-hidden border-b border-black/10 bg-[#fff8ec] px-3 text-base">
       <button
         type="button"
         onClick={onOpen}
-        className="flex min-h-12 flex-1 items-center gap-3 text-left"
+        className="flex min-h-12 min-w-0 flex-1 items-center gap-3 truncate text-left"
         aria-label="Open materials summary"
       >
         {property.levels.length > 1 && lvl && (
@@ -756,9 +1162,24 @@ function AreaBar({
       </button>
       <button
         type="button"
+        onClick={onQuote}
+        className="h-10 shrink-0 rounded-full bg-[#b4561d] px-3 text-sm font-semibold text-white"
+      >
+        Quote
+      </button>
+      <button
+        type="button"
+        onClick={onSeams}
+        aria-pressed={seamsOn}
+        className={`h-10 shrink-0 rounded-full px-3 text-sm font-semibold ${seamsOn ? "bg-black text-white" : "bg-black/5"}`}
+      >
+        Seams
+      </button>
+      <button
+        type="button"
         onClick={onUnits}
         aria-label="Switch units"
-        className="h-10 rounded-full bg-black/5 px-4 text-sm font-semibold"
+        className="h-10 shrink-0 rounded-full bg-black/5 px-4 text-sm font-semibold"
       >
         {property.units === "ft" ? "ft" : "m"}
       </button>
@@ -785,7 +1206,7 @@ function LevelBar({
   const current = property.levels.find((l) => l.id === levelId);
   return (
     <div
-      className="flex items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
+      className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-x-auto border-b border-black/10 bg-white px-3 py-2"
       role="tablist"
       aria-label="Levels"
     >
@@ -894,7 +1315,7 @@ function IconBtn({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className="flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-30"
+      className="flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-30"
     >
       {children}
     </button>
@@ -905,10 +1326,12 @@ function Sheet({
   onClose,
   children,
   title,
+  helpId,
 }: {
   onClose: () => void;
   children: React.ReactNode;
   title: string;
+  helpId?: string;
 }) {
   useBackClose(true, onClose);
   return (
@@ -922,6 +1345,7 @@ function Sheet({
       >
         <div className="mb-4 flex items-center gap-2">
           <h2 className="flex-1 text-2xl font-bold">{title}</h2>
+          {helpId && <HelpMark id={helpId} />}
           <button
             type="button"
             aria-label="Close"
@@ -1264,7 +1688,7 @@ function ExportSheet({ property, onClose }: { property: FieldProperty; onClose: 
     onClose();
   };
   return (
-    <Sheet title="Export plan" onClose={onClose}>
+    <Sheet title="Export plan" helpId="pdf" onClose={onClose}>
       <div className="grid gap-2">
         <MethodBtn
           icon={<Share2 />}

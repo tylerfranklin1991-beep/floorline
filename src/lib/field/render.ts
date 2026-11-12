@@ -14,7 +14,7 @@ import {
   stairsTreads,
   type FieldProperty,
 } from "./model.ts";
-import { carpetLayout, roomFlooring } from "./materials.ts";
+import { carpetPlans } from "./tseam.ts";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -133,12 +133,25 @@ export function renderPlanSvg(full: FieldProperty, opts: RenderOptions = {}): st
       );
   }
   if (opts.seams ?? full.showSeams !== false) {
-    for (const room of p.rooms) {
-      if (roomFlooring(room, p.job).material !== "carpet") continue;
-      for (const sm of carpetLayout(room, p.units, roomFlooring(room, p.job)).seams)
+    for (const plan of carpetPlans(p)) {
+      for (const m of plan.layout.marks) {
+        const color = m.kind === "t" ? "#9a3412" : "#d0342c";
+        const dash = m.kind === "t" ? "" : ` stroke-dasharray="${0.35 / unit} ${0.22 / unit}"`;
         parts.push(
-          `<path d="M${sm.a.x} ${sm.a.y} L${sm.b.x} ${sm.b.y}" stroke="#d0342c" stroke-width="${0.08 / unit}" stroke-dasharray="${0.5 / unit} ${0.3 / unit}"/>`,
+          `<path d="M${m.a.x} ${m.a.y} L${m.b.x} ${m.b.y}" fill="none" stroke="${color}" stroke-width="${(m.kind === "t" ? 0.1 : 0.07) / unit}"${dash}/>`,
         );
+      }
+      for (const piece of plan.layout.pieces) {
+        if (piece.corners.length < 3) continue;
+        const c = {
+          x: piece.corners.reduce((s, q) => s + q.x, 0) / piece.corners.length,
+          y: piece.corners.reduce((s, q) => s + q.y, 0) / piece.corners.length,
+        };
+        const ang = piece.pile.y === 1 ? 90 : 0;
+        parts.push(
+          `<text x="${c.x}" y="${c.y}" font-size="${font * 0.8}" font-weight="700" text-anchor="middle" fill="#9a3412" transform="rotate(${ang} ${c.x} ${c.y})">${piece.n} →</text>`,
+        );
+      }
     }
   }
   if (opts.scaleBar) {

@@ -63,6 +63,11 @@ export interface FieldRoom {
   flooring?: Partial<RoomFlooring>;
   /** Islands, cabinets, hearths (subtract) or bump-outs / closets (add), as simple w × l areas. */
   areas?: RoomArea[];
+  /**
+   * This room is a closet drawn off another room. When `includeInParent` is set,
+   * its area rolls into the parent total; otherwise it is listed on its own.
+   */
+  closet?: { parentId: string; includeInParent: boolean };
 }
 
 export interface RoomArea {
@@ -160,6 +165,8 @@ export interface FieldOpening {
   width: number;
   /** Transition override at this doorway; automatic when missing. */
   transition?: TransitionType;
+  /** Cased opening (trimmed, no door slab). `kind` stays "opening". */
+  cased?: boolean;
 }
 
 export interface FieldProperty {
@@ -180,6 +187,10 @@ export interface FieldProperty {
   reuseFills?: boolean;
   /** Show carpet seams on the plan and in exports (default on). */
   showSeams?: boolean;
+  /** Lay touching carpet rooms, halls and closets as one roll layout. */
+  combineCarpet?: boolean;
+  /** Last customer quote saved on this job. */
+  quote?: unknown;
   /** Per-job settings and customer info (see job.ts). */
   job?: Partial<JobSettings>;
   createdAt: number;
@@ -636,29 +647,167 @@ export function translate(points: Pt[], dx: number, dy: number): Pt[] {
 }
 
 /**
- * Set wall `index` to `length`, keeping every wall horizontal/vertical.
- * The wall's end corner and the next corner slide along the wall's direction,
- * so the following wall moves intact and the opposite wall absorbs the change.
- * Returns null if the change would collapse a wall.
+ * Set wall `index` to `length` by sliding only that wall's end corner along
+ * the wall. Every other corner stays where it is, so the opposite wall keeps
+ * its length. The next wall may become diagonal and the outline may no longer
+ * close as a rectangle — {@link closureGap} is that miss. Returns null only
+ * when the length is unusable or a wall would shrink to nothing.
  */
 export function setWallLength(points: Pt[], index: number, length: number): Pt[] | null {
   const n = points.length;
-  if (!(length > 0) || n < 4) return null;
+  if (!(length > 0) || n < 3) return null;
   const a = points[index];
   const b = points[(index + 1) % n];
   const current = Math.hypot(b.x - a.x, b.y - a.y);
   if (current === 0) return null;
   const ux = (b.x - a.x) / current;
   const uy = (b.y - a.y) / current;
-  const delta = length - current;
   const i1 = (index + 1) % n;
-  const i2 = (index + 2) % n;
+  const r4 = (v: number) => Math.round(v * 10000) / 10000;
   const next = points.map((p, k) =>
-    k === i1 || k === i2 ? { x: round2(p.x + ux * delta), y: round2(p.y + uy * delta) } : { ...p },
+    k === i1 ? { x: r4(a.x + ux * length), y: r4(a.y + uy * length) } : { ...p },
   );
-  if (edges(next).some((e) => e.length < 0.1)) return null;
-  if (!isSimple(next)) return null;
+  if (edges(next).some((e) => e.length < 0.05)) return null;
   return next;
+}
+
+/** Nearest axis, as an exact unit. A wall a few degrees off still counts as that axis. */
+function axisUnit(dx: number, dy: number): Pt {
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: dx < 0 ? -1 : 1, y: 0 };
+  return { x: 0, y: dy < 0 ? -1 : 1 };
+}
+
+/**
+ * How far the walls miss a square close. Every wall is walked on its nearest
+ * axis at its real length. A closed rectangle is 0. A 13' top against a 12'
+ * bottom is 1', even if the joining wall has tilted.
+ */
+export function closureGap(points: Pt[]): number {
+  const g = closureVector(points);
+  return round2(Math.hypot(g.x, g.y));
+}
+
+function closureVector(points: Pt[]): Pt {
+  let x = 0;
+  let y = 0;
+  for (const e of edges(points)) {
+    const dx = e.b.x - e.a.x;
+    const dy = e.b.y - e.a.y;
+    const u = axisUnit(dx, dy);
+    const along = dx * u.x + dy * u.y;
+    x += u.x * along;
+    y += u.y * along;
+  }
+  return { x, y };
+}
+
+/** Nearest ½" or 1" (feet), or the same distance in metres. */
+export function snapWallLength(length: number, units: Units, inches: 0.5 | 1): number {
+  const step = units === "ft" ? inches / 12 : (inches / 12) * 0.3048;
+  if (!(step > 0) || !(length > 0)) return length;
+  return Math.max(step, Math.round(length / step) * step);
+}
+
+const WALL_SNAP_KEY = "floorline.wall-snap-in";
+
+export function wallSnapInches(): 0.5 | 1 {
+  try {
+    return globalThis.localStorage?.getItem(WALL_SNAP_KEY) === "1" ? 1 : 0.5;
+  } catch {
+    return 0.5;
+  }
+}
+
+export function setWallSnapInches(n: 0.5 | 1) {
+  try {
+    globalThis.localStorage?.setItem(WALL_SNAP_KEY, String(n));
+  } catch {
+    /* private mode */
+  }
+}
+
+export type SquareUpChange = { wall: number; from: number; to: number };
+export type SquareUpPlan = {
+  wall: number;
+  points: Pt[];
+  changes: SquareUpChange[];
+  gapBefore: number;
+  gapAfter: number;
+};
+
+/**
+ * Ways to close the gap by changing one wall's length along its own axis.
+ * Other walls keep their axis and their length. Results that leave a gap,
+ * shrink a wall under 6", or reverse a wall are left out. Lengthening the
+ * short side comes before shortening the long side.
+ */
+export function squareUpOptions(points: Pt[], units: Units = "ft"): SquareUpPlan[] {
+  const n = points.length;
+  if (n < 3) return [];
+  const es = edges(points);
+  const walk = es.map((e) => {
+    const dx = e.b.x - e.a.x;
+    const dy = e.b.y - e.a.y;
+    const u = axisUnit(dx, dy);
+    return { u, len: dx * u.x + dy * u.y };
+  });
+  let gx = 0;
+  let gy = 0;
+  for (const w of walk) {
+    gx += w.u.x * w.len;
+    gy += w.u.y * w.len;
+  }
+  const gapBefore = Math.hypot(gx, gy);
+  if (gapBefore < 0.04) return [];
+  const minLen = units === "ft" ? 0.5 : 0.1524;
+  const out: SquareUpPlan[] = [];
+  for (let i = 0; i < n; i++) {
+    const u = walk[i].u;
+    const delta = -(gx * u.x + gy * u.y);
+    const newLen = walk[i].len + delta;
+    if (!(newLen >= minLen)) continue;
+    const rx = gx + u.x * delta;
+    const ry = gy + u.y * delta;
+    if (Math.hypot(rx, ry) > 0.08) continue;
+    const nextWalk = walk.map((w, k) => (k === i ? { ...w, len: newLen } : w));
+    const pts: Pt[] = [{ x: points[0].x, y: points[0].y }];
+    let p = pts[0];
+    for (let k = 0; k < n - 1; k++) {
+      p = {
+        x: Math.round((p.x + nextWalk[k].u.x * nextWalk[k].len) * 10000) / 10000,
+        y: Math.round((p.y + nextWalk[k].u.y * nextWalk[k].len) * 10000) / 10000,
+      };
+      pts.push(p);
+    }
+    if (edges(pts).some((e) => e.length < minLen - 0.01)) continue;
+    const before = es.map((e) => e.length);
+    const after = edges(pts).map((e) => e.length);
+    const changes = after
+      .map((to, k) => ({ wall: k, from: before[k], to }))
+      .filter((c) => formatLength(c.from, units) !== formatLength(c.to, units));
+    out.push({
+      wall: i,
+      points: pts,
+      changes,
+      gapBefore: round2(gapBefore),
+      gapAfter: round2(Math.hypot(rx, ry)),
+    });
+  }
+  out.sort((a, b) => {
+    const da = (a.changes.find((c) => c.wall === a.wall)?.to ?? 0) - (a.changes.find((c) => c.wall === a.wall)?.from ?? 0);
+    const db = (b.changes.find((c) => c.wall === b.wall)?.to ?? 0) - (b.changes.find((c) => c.wall === b.wall)?.from ?? 0);
+    if (da > 0 !== db > 0) return da > 0 ? -1 : 1;
+    return Math.abs(da) - Math.abs(db);
+  });
+  return out;
+}
+
+/** The preferred square-up, or the chosen wall when it is a valid close. */
+export function squareUp(points: Pt[], wall?: number, units: Units = "ft"): SquareUpPlan | null {
+  const options = squareUpOptions(points, units);
+  if (!options.length) return null;
+  if (wall == null) return options[0];
+  return options.find((o) => o.wall === wall) ?? null;
 }
 
 /** Move corner k, dragging its two walls with it so the outline stays rectilinear. */
@@ -701,6 +850,35 @@ function segmentsCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt): boolean {
     ((d1 > 1e-9 && d2 < -1e-9) || (d1 < -1e-9 && d2 > 1e-9)) &&
     ((d3 > 1e-9 && d4 < -1e-9) || (d3 < -1e-9 && d4 > 1e-9))
   );
+}
+
+function onSegment(p: Pt, a: Pt, b: Pt): boolean {
+  const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+  if (Math.abs(cross) > 1e-6) return false;
+  const dot = (p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y);
+  if (dot < -1e-6) return false;
+  const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  return dot <= len2 + 1e-6;
+}
+
+/** Inside the outline, not sitting on a shared wall or corner. */
+function strictlyInside(p: Pt, poly: Pt[]): boolean {
+  if (edges(poly).some((e) => onSegment(p, e.a, e.b))) return false;
+  return pointInPolygon(p, poly);
+}
+
+/** True when two room outlines cross or one sits inside the other. Shared walls do not count. */
+export function polygonsOverlap(a: Pt[], b: Pt[]): boolean {
+  if (a.length < 3 || b.length < 3) return false;
+  if (a.some((p) => strictlyInside(p, b)) || b.some((p) => strictlyInside(p, a))) return true;
+  const ea = edges(a);
+  const eb = edges(b);
+  for (const x of ea) {
+    for (const y of eb) {
+      if (segmentsCross(x.a, x.b, y.a, y.b)) return true;
+    }
+  }
+  return false;
 }
 
 /** True when no two non-adjacent walls cross. */
@@ -920,7 +1098,8 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
   for (const r of v.rooms) {
     if (!r || typeof r.id !== "string" || !Array.isArray(r.points)) continue;
     const points = r.points.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
-    if (points.length < 4) continue;
+    if (points.length < 3) continue;
+    const closetRaw = r.closet as { parentId?: unknown; includeInParent?: unknown } | undefined;
     rooms.push({
       id: r.id,
       name: typeof r.name === "string" ? r.name : "Room",
@@ -948,9 +1127,22 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
               })),
           }
         : {}),
+      ...(closetRaw && typeof closetRaw.parentId === "string"
+        ? {
+            closet: {
+              parentId: closetRaw.parentId,
+              includeInParent: closetRaw.includeInParent !== false,
+            },
+          }
+        : {}),
     });
   }
   const ids = new Set(rooms.map((r) => r.id));
+  for (const room of rooms) {
+    if (room.closet && (room.closet.parentId === room.id || !ids.has(room.closet.parentId))) {
+      delete room.closet;
+    }
+  }
   return {
     id: v.id,
     name: typeof v.name === "string" ? v.name : "Property",
@@ -958,7 +1150,11 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     ...(sanitizeGeo(v.location) ? { location: sanitizeGeo(v.location) } : {}),
     units: v.units === "m" ? "m" : "ft",
     rooms,
-    openings: Array.isArray(v.openings) ? v.openings.filter((o) => o && ids.has(o.roomId)) : [],
+    openings: Array.isArray(v.openings)
+      ? v.openings
+          .filter((o) => o && ids.has(o.roomId))
+          .map((o) => ({ ...o, ...(o.cased === true ? { cased: true } : { cased: undefined }) }))
+      : [],
     levels,
     stairs: Array.isArray(v.stairs)
       ? v.stairs
@@ -968,6 +1164,8 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
     includeStairs: v.includeStairs === true,
     reuseFills: v.reuseFills === true,
     showSeams: v.showSeams !== false,
+    combineCarpet: v.combineCarpet === true,
+    ...(v.quote && typeof v.quote === "object" ? { quote: v.quote } : {}),
     ...(v.job && typeof v.job === "object" ? { job: { ...v.job } } : {}),
     createdAt: Number(v.createdAt) || Date.now(),
     updatedAt: Number(v.updatedAt) || Date.now(),
