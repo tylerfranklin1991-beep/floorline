@@ -671,11 +671,10 @@ export function setWallLength(points: Pt[], index: number, length: number): Pt[]
   return next;
 }
 
-/** Nearest axis (0/90/180/270). No slack: a wall a few degrees off still counts as that axis. */
+/** Nearest axis, as an exact unit. A wall a few degrees off still counts as that axis. */
 function axisUnit(dx: number, dy: number): Pt {
-  const ang = Math.atan2(dy, dx);
-  const snapped = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2);
-  return { x: Math.cos(snapped), y: Math.sin(snapped) };
+  if (Math.abs(dx) >= Math.abs(dy)) return { x: dx < 0 ? -1 : 1, y: 0 };
+  return { x: 0, y: dy < 0 ? -1 : 1 };
 }
 
 /**
@@ -692,9 +691,12 @@ function closureVector(points: Pt[]): Pt {
   let x = 0;
   let y = 0;
   for (const e of edges(points)) {
-    const u = axisUnit(e.b.x - e.a.x, e.b.y - e.a.y);
-    x += u.x * e.length;
-    y += u.y * e.length;
+    const dx = e.b.x - e.a.x;
+    const dy = e.b.y - e.a.y;
+    const u = axisUnit(dx, dy);
+    const along = dx * u.x + dy * u.y;
+    x += u.x * along;
+    y += u.y * along;
   }
   return { x, y };
 }
@@ -743,7 +745,12 @@ export function squareUpOptions(points: Pt[], units: Units = "ft"): SquareUpPlan
   const n = points.length;
   if (n < 3) return [];
   const es = edges(points);
-  const walk = es.map((e) => ({ u: axisUnit(e.b.x - e.a.x, e.b.y - e.a.y), len: e.length }));
+  const walk = es.map((e) => {
+    const dx = e.b.x - e.a.x;
+    const dy = e.b.y - e.a.y;
+    const u = axisUnit(dx, dy);
+    return { u, len: dx * u.x + dy * u.y };
+  });
   let gx = 0;
   let gy = 0;
   for (const w of walk) {
@@ -776,8 +783,8 @@ export function squareUpOptions(points: Pt[], units: Units = "ft"): SquareUpPlan
     const before = es.map((e) => e.length);
     const after = edges(pts).map((e) => e.length);
     const changes = after
-      .map((to, k) => ({ wall: k, from: round2(before[k]), to: round2(to) }))
-      .filter((c) => Math.abs(c.to - c.from) > 0.04);
+      .map((to, k) => ({ wall: k, from: before[k], to }))
+      .filter((c) => formatLength(c.from, units) !== formatLength(c.to, units));
     out.push({
       wall: i,
       points: pts,

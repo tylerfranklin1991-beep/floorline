@@ -71,7 +71,7 @@ export function LaserButton({ onClick }: { onClick: () => void }) {
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="relative flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-black/5"
+      className="relative flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-black/5"
     >
       <Ruler />
       <span className={`absolute right-1.5 top-1.5 size-2.5 rounded-full ${dotClass(disto.status)}`} />

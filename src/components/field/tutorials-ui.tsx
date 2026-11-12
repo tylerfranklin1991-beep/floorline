@@ -16,7 +16,7 @@ export function HelpButton({ onClick }: { onClick: () => void }) {
       title="Help"
       data-testid="help-button"
       onClick={onClick}
-      className="flex size-12 shrink-0 items-center justify-center rounded-full hover:bg-black/5"
+      className="flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-black/5"
     >
       <CircleHelp />
     </button>
