@@ -774,10 +774,25 @@ function segmentsCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt): boolean {
   );
 }
 
-/** True when two room outlines cross or one sits inside the other. Shared corners do not count. */
+function onSegment(p: Pt, a: Pt, b: Pt): boolean {
+  const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+  if (Math.abs(cross) > 1e-6) return false;
+  const dot = (p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y);
+  if (dot < -1e-6) return false;
+  const len2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  return dot <= len2 + 1e-6;
+}
+
+/** Inside the outline, not sitting on a shared wall or corner. */
+function strictlyInside(p: Pt, poly: Pt[]): boolean {
+  if (edges(poly).some((e) => onSegment(p, e.a, e.b))) return false;
+  return pointInPolygon(p, poly);
+}
+
+/** True when two room outlines cross or one sits inside the other. Shared walls do not count. */
 export function polygonsOverlap(a: Pt[], b: Pt[]): boolean {
   if (a.length < 3 || b.length < 3) return false;
-  if (a.some((p) => pointInPolygon(p, b)) || b.some((p) => pointInPolygon(p, a))) return true;
+  if (a.some((p) => strictlyInside(p, b)) || b.some((p) => strictlyInside(p, a))) return true;
   const ea = edges(a);
   const eb = edges(b);
   for (const x of ea) {
