@@ -41,6 +41,42 @@ export type EditorMode = "select" | "draw" | "door" | "window" | "opening" | "st
 
 type View = { scale: number; tx: number; ty: number };
 
+type ScreenBox = { l: number; t: number; r: number; b: number };
+
+/** Wall-length chips sit outside the room and step further out if they would cover each other. */
+function layoutWallLabels(
+  es: { a: Pt; b: Pt; index: number; length: number; horizontal: boolean }[],
+  view: { scale: number; tx: number; ty: number },
+  placed: ScreenBox[],
+) {
+  return es.map((e) => {
+    const L = e.length || 1;
+    const nx = (e.b.y - e.a.y) / L;
+    const ny = -(e.b.x - e.a.x) / L;
+    let dist = 26;
+    let x = (e.a.x + e.b.x) / 2;
+    let y = (e.a.y + e.b.y) / 2;
+    for (let step = 0; step < 8; step++) {
+      x = (e.a.x + e.b.x) / 2 + nx * (dist / Math.max(view.scale, 1));
+      y = (e.a.y + e.b.y) / 2 + ny * (dist / Math.max(view.scale, 1));
+      let sy = view.ty + y * view.scale;
+      if (sy < 56) {
+        y += (56 - sy) / Math.max(view.scale, 1);
+        sy = 56;
+      }
+      const sx = view.tx + x * view.scale;
+      const box = { l: sx - 34, t: sy - 14, r: sx + 34, b: sy + 14 };
+      const hit = placed.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
+      if (!hit || step === 7) {
+        placed.push(box);
+        break;
+      }
+      dist += 22;
+    }
+    return { e, x, y };
+  });
+}
+
 function labelRotation(e: { a: Pt; b: Pt; horizontal: boolean }): number {
   const axis = Math.abs(e.a.x - e.b.x) < 1e-3 || Math.abs(e.a.y - e.b.y) < 1e-3;
   if (axis) return e.horizontal ? 0 : -90;
@@ -799,7 +835,9 @@ export function PlanEditor({
               </g>
             );
           })}
-          {property.rooms.map((room) => {
+          {(() => {
+            const placedLabels: ScreenBox[] = [];
+            return property.rooms.map((room) => {
             const c = centroid(room.points);
             const fs = Math.max(px(13), Math.min(1.1 / unitPx, px(22)));
             const thumbW = px(64);
@@ -868,18 +906,7 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {(room.id === selectedRoomId || view.scale >= 14) && edges(room.points).map((e) => {
-                  const L = e.length || 1;
-                  const nx = -(e.b.y - e.a.y) / L;
-                  const ny = (e.b.x - e.a.x) / L;
-                  const rawX = (e.a.x + e.b.x) / 2 + nx * px(22);
-                  const rawY = (e.a.y + e.b.y) / 2 + ny * px(22);
-                  const sx = view.tx + rawX * view.scale;
-                  const sy = view.ty + rawY * view.scale;
-                  const clampedX = Math.min(Math.max(sx, 36), Math.max(36, size.w - 36));
-                  const clampedY = Math.min(Math.max(sy, 52), Math.max(52, size.h - 20));
-                  const tx = (clampedX - view.tx) / view.scale;
-                  const ty = (clampedY - view.ty) / view.scale;
+                {(room.id === selectedRoomId || view.scale >= 14) && layoutWallLabels(edges(room.points), view, placedLabels).map(({ e, x: tx, y: ty }) => {
                   const label = formatLength(e.length, property.units);
                   const bw = px(label.length * 7.5 + 14);
                   const bh = px(22);
@@ -918,7 +945,8 @@ export function PlanEditor({
                 })}
               </g>
             );
-          })}
+          });
+          })()}
           {selected && focusWall != null && edges(selected.points)[focusWall] && (
             <line
               x1={edges(selected.points)[focusWall].a.x}
@@ -970,7 +998,10 @@ export function PlanEditor({
               ))}
             </g>
           )}
-          {selected && mode === "select" && isRectilinear(selected.points) && (
+          {selected && mode === "select" && isRectilinear(selected.points) && (() => {
+            const b = bbox(selected.points);
+            return (b.maxX - b.minX) * view.scale >= 120 && (b.maxY - b.minY) * view.scale >= 120;
+          })() && (
             <g>
               {edges(selected.points).map((e) => (
                 <rect

@@ -204,6 +204,19 @@ export function closeBlockReason(draft: Draft): string | null {
   return null;
 }
 
+/**
+ * Straight distance back to the start, and the same square-close gap Square up uses.
+ * They match on a right-angle miss. A diagonal closing shot names both.
+ */
+export function describeClose(points: Pt[], units: Units): string {
+  const home = gapToStart(points);
+  const square = closureGap(points);
+  const homeText = formatLength(home, units);
+  const squareText = formatLength(square, units);
+  if (homeText === squareText) return `Gap ${squareText}`;
+  return `${homeText} to the start, ${squareText} off square`;
+}
+
 /** Close the open chain with a button. The error is the square-close miss, not the straight line back to the start. */
 export function closeDraft(draft: Draft): ShotResult {
   const blocked = closeBlockReason(draft);
@@ -351,6 +364,8 @@ export type CommittedOutline = {
   openings: FieldOpening[];
   closets: FieldRoom[];
   closingError: number;
+  /** Straight-line home and the square-close gap, in one sentence. */
+  closeText: string;
 };
 
 /**
@@ -394,7 +409,7 @@ export function commitDraft(
     if (c.includeInParent) closet.flooring = { material: "none" };
     return closet;
   });
-  return { ok: true, committed: { room, openings, closets, closingError } };
+  return { ok: true, committed: { room, openings, closets, closingError, closeText: describeClose(draft.points, opts.units) } };
 }
 
 function wallLength(points: Pt[], index: number): number {
