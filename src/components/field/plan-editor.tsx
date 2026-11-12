@@ -94,12 +94,18 @@ function chromeInsets(boxes: ScreenBox[], w: number, h: number) {
   let right = 8;
   for (const o of boxes) {
     if (o.b - o.t < 8 || o.r - o.l < 8) continue;
-    if (o.t < h * 0.45) top = Math.max(top, Math.min(o.b + 8, h * 0.42));
-    if (o.b > h * 0.5) bottom = Math.max(bottom, Math.min(h - o.t + 8, h * 0.5));
-    if (o.r < w * 0.55 && o.l < 24) left = Math.max(left, o.r + 6);
-    if (o.l > w * 0.45 && o.r > w - 24) right = Math.max(right, w - o.l + 6);
+    // A bar along the top (zoom, laser) only eats vertical space. Treating it
+    // as a side margin shrinks the plan to a strip.
+    const topBar = o.b < h * 0.55 && o.t < h * 0.4;
+    if (topBar) top = Math.max(top, Math.min(o.b + 8, h * 0.42));
+    if (o.b > h * 0.55) bottom = Math.max(bottom, Math.min(h - o.t + 8, h * 0.5));
+    if (!topBar && o.b > h * 0.3 && o.t < h * 0.7) {
+      if (o.r < w * 0.55 && o.l < 24) left = Math.max(left, o.r + 6);
+      if (o.l > w * 0.45 && o.r > w - 24) right = Math.max(right, w - o.l + 6);
+    }
   }
-  return { top: top + 6, bottom: bottom + 36, left: left + 40, right: right + 40 };
+  // 22px outside the wall plus a 36px half-width chip, with a few pixels of air.
+  return { top: top + 40, bottom: bottom + 40, left: left + 64, right: right + 64 };
 }
 
 /**
@@ -250,6 +256,10 @@ export function PlanEditor({
   const labelPending = useRef<{ roomId: string; index: number; points: Pt[] } | null>(null);
   const measured = useRef(false);
   const fitKey = useRef("");
+  const roomsRef = useRef(property.rooms);
+  const stairsRef = useRef(property.stairs);
+  roomsRef.current = property.rooms;
+  stairsRef.current = property.stairs;
   const selectedRoomId = useField((s) => s.selectedRoomId);
   const select = useField((s) => s.select);
   const selectedOpeningId = useField((s) => s.selectedOpeningId);
@@ -357,8 +367,8 @@ export function PlanEditor({
 
   const fit = useCallback(() => {
     const pts = [
-      ...property.rooms.flatMap((r) => r.points),
-      ...property.stairs.flatMap((st) => {
+      ...roomsRef.current.flatMap((r) => r.points),
+      ...stairsRef.current.flatMap((st) => {
         const r = stairsRect(st);
         return [
           { x: r.x, y: r.y },
