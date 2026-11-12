@@ -83,18 +83,18 @@ test("a shot that misses by 2 ft does not close", () => {
   assert.equal(next.draft.roomClosed, false);
 });
 
-test("close room reports the gap back to the start", () => {
-  let d = { ...blankDraft(0), headingDeg: 0 };
+test("close room reports the square-close gap, not the straight line home", () => {
+  let d = { ...blankDraft(0), headingDeg: 90 };
   d = must(shoot(d, 12, "ft")).draft;
-  d = { ...d, headingDeg: 90 };
-  d = must(shoot(d, 10, "ft")).draft;
   d = { ...d, headingDeg: 180 };
-  d = must(shoot(d, 12, "ft")).draft;
+  d = must(shoot(d, 10, "ft")).draft;
+  d = { ...d, headingDeg: 270 };
+  d = must(shoot(d, 11.5, "ft")).draft;
   const closed = must(closeDraft(d));
   assert.equal(closed.event, "closed");
   if (closed.event !== "closed") return;
-  near(closed.closingError, 10);
-  assert.equal(formatLength(closed.closingError, "ft"), `10'`);
+  near(closed.closingError, 0.5);
+  assert.equal(formatLength(closed.closingError, "ft"), `0'-6"`);
 });
 
 test("custom 30° segment and a DISTO float both extend the chain", () => {

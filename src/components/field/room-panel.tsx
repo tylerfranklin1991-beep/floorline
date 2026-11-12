@@ -14,6 +14,7 @@ import {
   ROOM_PRESETS,
   setWallLength,
   squareUp,
+  squareUpOptions,
   type FieldProperty,
   type FieldRoom,
 } from "@/lib/field/model";
@@ -84,11 +85,12 @@ export function LengthInput({
 export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldProperty["units"] }) {
   const updateRoom = useField((s) => s.updateRoom);
   const [open, setOpen] = useState(false);
-  const [wall, setWall] = useState(() => Math.max(0, room.points.length - 1));
-  useEffect(() => setWall(Math.max(0, room.points.length - 1)), [room.id, room.points.length]);
+  const options = squareUpOptions(room.points, units);
+  const [wall, setWall] = useState(() => options[0]?.wall ?? 0);
+  useEffect(() => setWall(squareUpOptions(room.points, units)[0]?.wall ?? 0), [room.id, room.points, units]);
   const gap = closureGap(room.points);
   if (gap <= 0.08) return null;
-  const plan = open ? squareUp(room.points, wall) : null;
+  const plan = open ? squareUp(room.points, wall, units) : null;
   return (
     <div className="border-t border-black/10 px-3 py-2">
       {!open ? (
@@ -97,6 +99,9 @@ export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldP
         </button>
       ) : (
         <div className="space-y-2">
+          {options.length === 0 ? (
+            <p className="text-sm text-[#8a3b12]">No single wall can close this gap without shrinking under 6".</p>
+          ) : (
           <label className="block text-sm font-semibold">
             Wall to adjust
             <select
@@ -105,20 +110,20 @@ export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldP
               onChange={(e) => setWall(Number(e.target.value))}
               className="mt-1 h-12 w-full rounded-xl border border-black/15 bg-white px-3 text-base"
             >
-              {room.points.map((_, i) => (
-                <option key={i} value={i}>
-                  Wall {i + 1}
-                  {i === room.points.length - 1 ? " (last)" : ""}
+              {options.map((o) => (
+                <option key={o.wall} value={o.wall}>
+                  Wall {o.wall + 1}
+                  {o.wall === options[0].wall ? " (best)" : ""}
                 </option>
               ))}
             </select>
           </label>
+          )}
           {plan ? (
             <ul className="text-sm">
               {plan.changes.map((c) => (
                 <li key={c.wall}>
                   Wall {c.wall + 1}: {formatLength(c.from, units)} → {formatLength(c.to, units)}
-                  {c.wall !== wall ? " (shares the moved corner)" : ""}
                 </li>
               ))}
               <li>
@@ -227,9 +232,11 @@ export function RoomPanel({
           aria-label="Room name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onBlur={() =>
-            name.trim() && name !== room.name && updateRoom(room.id, { name: name.trim() })
-          }
+          onBlur={() => {
+            const next = name.trim();
+            if (!next || next === room.name) return;
+            updateRoom(room.id, /bed/i.test(next) ? { name: next, flooring: { ...(room.flooring ?? {}), material: "carpet" } } : { name: next });
+          }}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
           className="h-14 w-full rounded-xl border border-black/15 bg-white px-4 text-xl font-semibold"
         />
@@ -238,7 +245,12 @@ export function RoomPanel({
             <button
               key={p}
               type="button"
-              onClick={() => updateRoom(room.id, { name: p })}
+              onClick={() =>
+                updateRoom(
+                  room.id,
+                  /bed/i.test(p) ? { name: p, flooring: { ...(room.flooring ?? {}), material: "carpet" } } : { name: p },
+                )
+              }
               className="h-11 rounded-full bg-black/5 px-4 text-base"
             >
               {p}

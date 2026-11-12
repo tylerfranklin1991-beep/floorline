@@ -62,7 +62,7 @@ type Drag =
   | { kind: "pinch"; d0: number; mid0: Pt; view: View }
   | { kind: "trace"; start: Pt; x: number; y: number }
   | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 }
-  | { kind: "label"; roomId: string; index: number; points: Pt[]; moved: boolean };
+  | { kind: "label"; roomId: string; index: number; points: Pt[]; moved: boolean; base: number; ax: number; ay: number };
 
 const HANDLE_PX = 22;
 /** A press that moves farther than this is a drag, not a tap that opens the room menu. */
@@ -132,6 +132,8 @@ export function PlanEditor({
   const [drag, setDrag] = useState<Drag | null>(null);
   const pointers = useRef(new Map<number, Pt>());
   const press = useRef({ x: 0, y: 0, menu: false });
+  const labelWait = useRef<number | null>(null);
+  const labelPending = useRef<{ roomId: string; index: number; points: Pt[] } | null>(null);
   const measured = useRef(false);
   const fitKey = useRef("");
   const selectedRoomId = useField((s) => s.selectedRoomId);
@@ -339,14 +341,29 @@ export function PlanEditor({
       return;
     }
     if (h === "label" && room && mode === "select") {
-      beginDrag();
-      setDrag({
-        kind: "label",
-        roomId: room.id,
-        index: Number(target!.dataset.i),
-        points: room.points,
-        moved: false,
-      });
+      const index = Number(target!.dataset.i);
+      labelPending.current = { roomId: room.id, index, points: room.points };
+      if (labelWait.current) window.clearTimeout(labelWait.current);
+      labelWait.current = window.setTimeout(() => {
+        const pending = labelPending.current;
+        labelWait.current = null;
+        if (!pending) return;
+        const src = pending.points;
+        const a = src[pending.index];
+        const b = src[(pending.index + 1) % src.length];
+        beginDrag();
+        setDrag({
+          kind: "label",
+          roomId: pending.roomId,
+          index: pending.index,
+          points: src,
+          moved: false,
+          base: Math.hypot(b.x - a.x, b.y - a.y),
+          ax: press.current.x,
+          ay: press.current.y,
+        });
+        labelPending.current = null;
+      }, 350);
       return;
     }
     if (h === "opening" && room) {
@@ -401,6 +418,16 @@ export function PlanEditor({
   const onPointerMove = (e: React.PointerEvent) => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!drag && labelPending.current) {
+      const d = Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y);
+      if (d > TAP_SLOP_PX) {
+        if (labelWait.current) window.clearTimeout(labelWait.current);
+        labelWait.current = null;
+        labelPending.current = null;
+        setDrag({ kind: "pan", start: { x: press.current.x, y: press.current.y }, view });
+      }
+      return;
+    }
     if (!drag) return;
     if (drag.kind === "pinch") {
       const pts = [...pointers.current.values()];
@@ -451,14 +478,18 @@ export function PlanEditor({
       return;
     }
     if (drag.kind === "label") {
-      if (!noteSlop(e)) return;
+      noteSlop(e);
       const src = drag.points;
       const a = src[drag.index];
       const b = src[(drag.index + 1) % src.length];
       const span = Math.hypot(b.x - a.x, b.y - a.y);
       if (span < 1e-6) return;
-      const raw = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / span;
-      const length = snapWallLength(raw, property.units, wallSnapInches());
+      const ux = (b.x - a.x) / span;
+      const uy = (b.y - a.y) / span;
+      const along =
+        ((e.clientX - drag.ax) / view.scale) * ux + ((e.clientY - drag.ay) / view.scale) * uy;
+      const min = property.units === "ft" ? 0.5 : 0.15;
+      const length = Math.max(min, snapWallLength(drag.base + along, property.units, wallSnapInches()));
       const next = setWallLength(src, drag.index, length);
       if (!next) return;
       if (!drag.moved) setDrag({ ...drag, moved: true });
@@ -513,6 +544,15 @@ export function PlanEditor({
 
   const onPointerUp = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
+    if (labelPending.current) {
+      const pending = labelPending.current;
+      labelPending.current = null;
+      if (labelWait.current) window.clearTimeout(labelWait.current);
+      labelWait.current = null;
+      select(pending.roomId);
+      onWallTap(pending.roomId, pending.index);
+      return;
+    }
     if (!drag) return;
     if (drag.kind === "pinch") {
       if (pointers.current.size === 0) setDrag(null);
@@ -873,11 +913,11 @@ export function PlanEditor({
                 >
                   {room.name}
                 </text>
-                {closureGap(room.points) > 0.08 && (
+                {view.scale >= 16 && closureGap(room.points) > 0.08 && (
                   <text
                     x={c.x}
-                    y={c.y + fs * 2.35}
-                    fontSize={fs * 0.7}
+                    y={c.y - fs * 1.6}
+                    fontSize={fs * 0.65}
                     fontWeight={700}
                     textAnchor="middle"
                     fill="#8a3b12"
@@ -910,7 +950,7 @@ export function PlanEditor({
                           property.units,
                         )}
                   </text>
-                {room.photos.slice(0, 3).map((ph, i, shown) => (
+                {view.scale >= 18 && room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
                     key={ph.id}
                     data-h="photo"
@@ -925,7 +965,7 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {edges(room.points).map((e) => {
+                {view.scale >= 14 && edges(room.points).map((e) => {
                   const L = e.length || 1;
                   const nx = -(e.b.y - e.a.y) / L;
                   const ny = (e.b.x - e.a.x) / L;
@@ -1112,15 +1152,6 @@ export function PlanEditor({
           {formatLength(Math.abs(drag.end.y - drag.start.y), property.units)}
         </div>
       )}
-      {mode !== "select" && !drag && (
-        <div className="pointer-events-none absolute left-1/2 top-3 w-[90%] max-w-md -translate-x-1/2 rounded-xl bg-[#b4561d] px-4 py-3 text-center text-base font-semibold text-white shadow-lg">
-          {mode === "draw"
-            ? "Drag on the grid to draw a room"
-            : mode === "stairs"
-              ? "Tap where the stairs go"
-              : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
-        </div>
-      )}
       <div className="absolute bottom-3 right-3 flex flex-col gap-2">
         <ZoomBtn label="+" onClick={() => zoomBy(1.4)} />
         <ZoomBtn label="−" onClick={() => zoomBy(1 / 1.4)} />
@@ -1130,11 +1161,14 @@ export function PlanEditor({
   );
 
   function zoomBy(k: number) {
+    const el = wrap.current;
+    const w = el?.clientWidth || size.w;
+    const h = el?.clientHeight || size.h;
     const scale = Math.max(4, Math.min(160, view.scale * k));
     const ratio = scale / view.scale;
-    const mx = size.w / 2;
-    const my = size.h / 2;
-    setView({ scale, tx: mx - (mx - view.tx) * ratio, ty: my - (my - view.ty) * ratio });
+    const mx = w / 2;
+    const my = h / 2;
+    setView({ scale, tx: mx - ((mx - view.tx) * ratio), ty: my - ((my - view.ty) * ratio) });
   }
 }
 

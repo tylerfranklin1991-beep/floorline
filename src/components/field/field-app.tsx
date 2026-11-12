@@ -43,6 +43,7 @@ import {
   nextRoomOrigin,
   newRoom,
   parseLength,
+  polygonsOverlap,
   rectilinearize,
   rectPoints,
   closureGap,
@@ -360,6 +361,12 @@ function SelectionBar({
         )}
       </div>
       {room && <SquareUpButton room={room} units={property.units} />}
+      {room &&
+        property.rooms.some((other) => other.id !== room.id && polygonsOverlap(room.points, other.points)) && (
+          <p className="px-3 pb-2 text-sm font-semibold text-[#8a3b12]">
+            This room overlaps another. Square footage may be counted twice.
+          </p>
+        )}
       {room && edge && (
         <div className="flex items-center gap-2 px-3 pb-2 text-xs font-semibold text-black/60">
           <span>Drag snap</span>
@@ -428,6 +435,15 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [cal, setCal] = useState<{ a: Pt; b: Pt } | null>(null);
   const [laserOpen, setLaserOpen] = useState(false);
   const [arrowOn, setArrowOn] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`floorline.draw-draft.${full.id}`);
+      const saved = raw ? (JSON.parse(raw) as { points?: unknown[]; roomClosed?: boolean }) : null;
+      if (saved?.points && saved.points.length > 1 && !saved.roomClosed) setArrowOn(true);
+    } catch {
+      /* ignore a bad save */
+    }
+  }, [full.id]);
   const [draft, setDraft] = useState<PlanDraft | null>(null);
   const [laserNote, setLaserNote] = useState<{ label: string; detail: string; reshoot: boolean } | null>(null);
   const arrowUndoRef = useRef<(() => boolean) | null>(null);
@@ -679,7 +695,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             e.target.value !== property.name &&
             change((p) => ({ ...p, name: e.target.value.trim() }))
           }
-          className="h-12 min-w-0 flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
+          className="h-12 min-w-[9.5rem] flex-1 rounded-lg bg-transparent px-2 text-lg font-bold"
         />
         <IconBtn
           label="Undo"
@@ -760,7 +776,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         )}
         {showSeams && <SeamDock property={full} onClose={() => setShowSeams(false)} />}
         {mode !== "select" && (
-          <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
+          <div className="absolute inset-x-3 top-12 z-10 flex items-center gap-2 rounded-2xl bg-black/85 p-2 pl-4 text-base font-semibold text-white">
             <span className="flex-1">{MODE_HINT[mode]}</span>
             <button
               type="button"
@@ -837,6 +853,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           defaultName={nextName()}
           undoRef={arrowUndoRef}
           readingRef={arrowReadRef}
+          storageId={full.id}
           onDraft={setDraft}
           onCommit={(committed) => {
             change((p) => ({
@@ -1008,7 +1025,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <WelcomeTip
           onStart={() => {
             dismissWelcome();
-            openHelp("getting-started");
+            openHelp("draw-room");
           }}
           onDismiss={() => {
             dismissWelcome();

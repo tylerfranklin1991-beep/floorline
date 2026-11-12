@@ -8,6 +8,7 @@ import { commit, initHistory, redo, undo, type History } from "./history.ts";
 import {
   area,
   bbox,
+  closureGap,
   edges,
   ensureClockwise,
   formatLength,
@@ -188,11 +189,11 @@ function finishChain(draft: Draft, chain: Pt[], error: number): ShotResult {
   };
 }
 
-/** Close the open chain with a button. The error is the gap from the free end back to the start. */
+/** Close the open chain with a button. The error is the square-close miss, not the straight line back to the start. */
 export function closeDraft(draft: Draft): ShotResult {
   const chain = draft.closetChain ?? draft.points;
   if (chain.length < 3) return { ok: false, reason: "Need at least three corners before closing." };
-  return finishChain(draft, chain, gapToStart(chain));
+  return finishChain(draft, chain, closureGap(chain));
 }
 
 export type OpeningInput = {

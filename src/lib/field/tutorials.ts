@@ -128,7 +128,7 @@ export const TUTORIALS: Tutorial[] = [
       step("getting-started", 1, "Name the job", "Type the address or a job name. Pick Feet & inches or Metres. You can switch later."),
       step("getting-started", 2, "Open the sketch", "Tap Start property. The plan fills the screen. Undo, settings, and the laser stay in the header."),
       step("getting-started", 3, "Nothing is lost", "Help, the laser, and export open on top of the drawing. Closing them puts you back on the same plan."),
-      step("getting-started", 4, "Add the first room", "Tap Add room. Draw it, type the size, or trace a photo. Tap a wall length whenever you want to correct it."),
+      step("getting-started", 4, "Add the first room", "Tap Add room. Draw it, type the size, or trace a photo. Tap a wall length to type it, or press and hold the length on the plan to drag it."),
     ],
   },
   {
@@ -181,9 +181,9 @@ export const TUTORIALS: Tutorial[] = [
     apps: ["beta", "beta2"],
     steps: [
       step("edit-walls", 1, "Tap the length", "Tap the length label on the wall. That wall is highlighted."),
-      step("edit-walls", 2, "The room bar", "A short bar shows the name and square feet. Type the length there, or drag the length on the plan (it snaps to ½ inch). Swipe the bar up for every wall."),
-      step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it. Dragging a label changes only that wall."),
-      step("edit-walls", 4, "Square up", "If a gap is shown, Square up previews the last wall, or the wall you pick, before it changes anything. Undo puts it back."),
+      step("edit-walls", 2, "The room bar", "A short bar shows the name and square feet. Type the length there. Press and hold a length on the plan to drag it (it snaps to ½ inch). A quick swipe still moves the view. Swipe the bar up for every wall."),
+      step("edit-walls", 3, "Type it", "12, 12.5, or 12'6\" in feet. Metres take 3.8 or 380cm. Enter commits it. A label drag changes only that wall, by how far your finger moved."),
+      step("edit-walls", 4, "Square up", "Square up only lists a wall that closes the gap by changing its own length. Apply it, or pick another wall. Undo puts the room back."),
       step("edit-walls", 5, "Undo", "The header Undo puts the previous shape back. Your other rooms stay as they were."),
     ],
   },
@@ -296,7 +296,7 @@ export const TUTORIALS: Tutorial[] = [
       step("quote", 1, "Open Quote", "Quote sits on the square-footage bar. The sheet opens on top of the sketch."),
       step("quote", 2, "Your business", "Business holds the name, phone, email, license and logo. It starts as SCG — replace it once and it stays on this phone."),
       step("quote", 3, "Fill in prices", "Every rate starts at $0. Type your price and it becomes the default for the next quote. Quantities come from the rooms."),
-      step("quote", 4, "Share the PDF", "Share PDF sends the quote, with a small plan on it, through the Android share sheet. It is also saved on the job."),
+      step("quote", 4, "Share the PDF", "The quote saves itself as you type, and when you leave the sheet. Share PDF sends it, with a small plan, through the Android share sheet."),
     ],
   },
   {

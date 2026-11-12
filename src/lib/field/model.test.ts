@@ -89,18 +89,20 @@ describe("editing walls", () => {
     assert.equal(closureGap(pts), 0);
   });
 
-  it("squareUp closes a stretched rectangle by the wall that can, and previews the change", () => {
-    const pts = rectPoints(0, 0, 10, 8);
-    const open = setWallLength(pts, 0, 12.5)!;
-    assert.ok(closureGap(open) > 2);
-    const last = squareUp(open, open.length - 1);
-    // The last wall is vertical, so it cannot eat a horizontal gap.
-    assert.equal(last, null);
-    const fix = squareUp(open, 0)!;
-    assert.ok(fix);
-    assert.ok(fix.gapAfter < 0.1);
-    assert.ok(fix.changes.some((c) => c.wall === 0));
-    assert.equal(fix.changes.filter((c) => c.wall === 2 || c.wall === 3).length, 0);
+  it("squareUp on a 12x12 with a 13' top lengthens the parallel wall only", () => {
+    const pts = rectPoints(0, 0, 12, 12);
+    const open = setWallLength(pts, 0, 13)!;
+    assert.ok(Math.abs(closureGap(open) - 1) < 0.15);
+    const best = squareUp(open, undefined, "ft");
+    assert.ok(best);
+    assert.equal(best!.wall, 2);
+    assert.ok(best!.gapAfter < 0.08);
+    const bottom = best!.changes.find((c) => c.wall === 2)!;
+    assert.ok(Math.abs(bottom.from - 12) < 0.05);
+    assert.ok(Math.abs(bottom.to - 13) < 0.05);
+    assert.equal(best!.changes.some((c) => c.to < 0.5), false);
+    assert.equal(squareUp(open, 1, "ft"), null);
+    assert.equal(squareUp(open, 3, "ft"), null);
   });
 
   it("snapWallLength lands on half inches", () => {
