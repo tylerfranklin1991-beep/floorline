@@ -213,7 +213,7 @@ export const TUTORIALS: Tutorial[] = [
       step("draw-walls", 1, "Draw walls", "In the laser sheet, tap Draw walls. The pad stays on the sketch."),
       step("draw-walls", 2, "Aim the arrow", "Up, down, left, right, the four 45° diagonals, or type an angle. 0° is up the page, clockwise."),
       step("draw-walls", 3, "Take the shot", "Press DIST, or type the length and tap Add wall. The segment grows from the last corner."),
-      step("draw-walls", 4, "Close the room", "Tap Close room, or keep shooting until a shot lands within 6 inches of the start. The gap is shown."),
+      step("draw-walls", 4, "Close the room", "Tap Close room, or keep shooting until a shot lands within 6 inches of the start. The gap is shown. If the outline crosses itself, the pad says why. The X asks whether to keep or discard the drawing."),
       step("draw-walls", 5, "Undo a shot", "Undo on the pad removes the last wall, opening, or closet. The header Undo removes the room after you close it."),
     ],
   },
