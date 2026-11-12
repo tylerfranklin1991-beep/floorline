@@ -503,6 +503,11 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   }, [full.id]);
   const [draft, setDraft] = useState<PlanDraft | null>(null);
   const [laserNote, setLaserNote] = useState<{ label: string; detail: string; reshoot: boolean } | null>(null);
+  useEffect(() => {
+    if (!laserNote?.detail?.startsWith("Closed.")) return;
+    const t = window.setTimeout(() => setLaserNote(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [laserNote]);
   const arrowUndoRef = useRef<(() => boolean) | null>(null);
   const arrowReadRef = useRef<((meters: number) => boolean) | null>(null);
   const focusRef = useRef<number | null>(null);
@@ -807,6 +812,9 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           focusWall={focusWall}
           draft={arrowOn ? draft : null}
           draftOrigin={nextRoomOrigin(property.rooms)}
+          bottomChrome={room || stairs ? 104 : 28}
+          padOpen={arrowOn}
+          onInteract={() => setLaserNote((n) => (n?.detail?.startsWith("Closed.") ? null : n))}
           onWallTap={(roomId, wall) => {
             select(roomId);
             setFocusWall(wall);
@@ -880,7 +888,6 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
                 detail: `Closed. ${committed.closeText}.`,
                 reshoot: false,
               });
-              toast.success(`${committed.room.name} closed · ${committed.closeText}`);
             }}
             onClose={() => setArrowOn(false)}
           />

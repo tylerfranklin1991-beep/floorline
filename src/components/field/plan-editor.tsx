@@ -70,38 +70,56 @@ const TAP_SLOP_PX = 10;
 
 type ScreenBox = { l: number; t: number; r: number; b: number };
 
-/** Wall-length chips sit outside the room and step further out if they would cover each other. */
+function boxesOverlap(a: ScreenBox, b: ScreenBox) {
+  return a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
+}
+
+/** Top-left of a carpet piece, clear of the room name at the centre. */
+function pieceMark(corners: Pt[], scale: number): Pt {
+  const s = Math.max(scale, 1);
+  return {
+    x: Math.min(...corners.map((q) => q.x)) + 14 / s,
+    y: Math.min(...corners.map((q) => q.y)) + 16 / s,
+  };
+}
+
+/**
+ * Wall-length chips sit outside the room. They step further out, then inward,
+ * and are dropped if they would cover a name, a piece number, or another label.
+ */
 function layoutWallLabels(
   es: { a: Pt; b: Pt; index: number; length: number; horizontal: boolean }[],
   view: { scale: number; tx: number; ty: number },
   placed: ScreenBox[],
+  limits: { top: number; bottom: number },
 ) {
-  return es.map((e) => {
+  const scale = Math.max(view.scale, 1);
+  const out: { e: (typeof es)[number]; x: number; y: number }[] = [];
+  for (const e of es) {
     const L = e.length || 1;
     const nx = (e.b.y - e.a.y) / L;
     const ny = -(e.b.x - e.a.x) / L;
-    let dist = 26;
-    let x = (e.a.x + e.b.x) / 2;
-    let y = (e.a.y + e.b.y) / 2;
-    for (let step = 0; step < 8; step++) {
-      x = (e.a.x + e.b.x) / 2 + nx * (dist / Math.max(view.scale, 1));
-      y = (e.a.y + e.b.y) / 2 + ny * (dist / Math.max(view.scale, 1));
-      let sy = view.ty + y * view.scale;
-      if (sy < 56) {
-        y += (56 - sy) / Math.max(view.scale, 1);
-        sy = 56;
+    const midX = (e.a.x + e.b.x) / 2;
+    const midY = (e.a.y + e.b.y) / 2;
+    let chosen: { x: number; y: number; box: ScreenBox } | null = null;
+    for (const sign of [1, -1]) {
+      for (let step = 0; step < 6 && !chosen; step++) {
+        const dist = 26 + step * 20;
+        const x = midX + nx * sign * (dist / scale);
+        const y = midY + ny * sign * (dist / scale);
+        const sx = view.tx + x * view.scale;
+        const sy = view.ty + y * view.scale;
+        if (sy < limits.top || sy > limits.bottom) continue;
+        const box = { l: sx - 34, t: sy - 14, r: sx + 34, b: sy + 14 };
+        if (placed.some((p) => boxesOverlap(box, p))) continue;
+        chosen = { x, y, box };
       }
-      const sx = view.tx + x * view.scale;
-      const box = { l: sx - 34, t: sy - 14, r: sx + 34, b: sy + 14 };
-      const hit = placed.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t);
-      if (!hit || step === 7) {
-        placed.push(box);
-        break;
-      }
-      dist += 22;
     }
-    return { e, x, y };
-  });
+    if (!chosen) continue;
+    placed.push(chosen.box);
+    out.push({ e, x: chosen.x, y: chosen.y });
+  }
+  return out;
 }
 
 function labelRotation(e: { a: Pt; b: Pt; horizontal: boolean }): number {
@@ -130,6 +148,9 @@ export function PlanEditor({
   draft,
   draftOrigin,
   seamEdit,
+  bottomChrome = 96,
+  padOpen = false,
+  onInteract,
 }: {
   property: FieldProperty;
   mode: EditorMode;
@@ -161,6 +182,12 @@ export function PlanEditor({
   draftOrigin?: Pt;
   /** Seam lines can be dragged, and the T-seam diagram is drawn on top. */
   seamEdit?: boolean;
+  /** Pixels at the bottom of the canvas covered by the room bar. */
+  bottomChrome?: number;
+  /** Draw-walls pad is open; keep zoom buttons off that pad. */
+  padOpen?: boolean;
+  /** Any press on the plan. */
+  onInteract?: () => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 360, h: 480 });
@@ -230,31 +257,32 @@ export function PlanEditor({
       }),
     ];
     const b = pts.length ? bbox(pts) : { minX: 0, minY: 0, w: 20 / unitPx, h: 16 / unitPx };
-    const pad = 56;
+    const topPad = 52;
+    const bottomPad = Math.max(48, bottomChrome);
     const scale = Math.max(
       4,
       Math.min(
         120,
-        Math.min((size.w - pad * 2) / Math.max(b.w, 1), (size.h - pad * 2) / Math.max(b.h, 1)),
+        Math.min((size.w - 72) / Math.max(b.w, 1), (size.h - topPad - bottomPad) / Math.max(b.h, 1)),
       ),
     );
     setView({
       scale,
       tx: (size.w - b.w * scale) / 2 - b.minX * scale,
-      ty: (size.h - b.h * scale) / 2 - b.minY * scale,
+      ty: topPad + (size.h - topPad - bottomPad - b.h * scale) / 2 - b.minY * scale,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx]);
+  }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx, bottomChrome]);
 
   // Fit when the job changes or the user asks. A keyboard or menu must not
   // zoom the plan just because the canvas element changed size.
   useEffect(() => {
     if (!measured.current || size.w < 40 || size.h < 40) return;
-    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}`;
+    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}|${bottomChrome}`;
     if (fitKey.current === key) return;
     fitKey.current = key;
     fit();
-  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx]);
+  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx, bottomChrome]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -279,6 +307,7 @@ export function PlanEditor({
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    onInteract?.();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     press.current = { x: e.clientX, y: e.clientY, menu: false };
@@ -787,6 +816,7 @@ export function PlanEditor({
                     x: piece.corners.reduce((s, q) => s + q.x, 0) / piece.corners.length,
                     y: piece.corners.reduce((s, q) => s + q.y, 0) / piece.corners.length,
                   };
+                  const mark = pieceMark(piece.corners, view.scale);
                   const len = px(18);
                   return (
                     <g key={`pc${piece.n}`} pointerEvents="none">
@@ -799,11 +829,11 @@ export function PlanEditor({
                         strokeWidth={px(1.5)}
                       />
                       <text
-                        x={c.x}
-                        y={c.y - px(4)}
+                        x={mark.x}
+                        y={mark.y}
                         fontSize={px(12)}
                         fontWeight={700}
-                        textAnchor="middle"
+                        textAnchor="start"
                         fill="#9a3412"
                       >
                         {piece.n}
@@ -938,6 +968,22 @@ export function PlanEditor({
             const c = centroid(room.points);
             const fs = Math.max(px(13), Math.min(1.1 / unitPx, px(22)));
             const thumbW = px(64);
+            const fontPx = fs * view.scale;
+            const nsx = view.tx + c.x * view.scale;
+            const nsy = view.ty + c.y * view.scale;
+            const nameW = Math.max(36, room.name.length * fontPx * 0.56);
+            placedLabels.push({
+              l: nsx - nameW / 2,
+              t: nsy - fontPx * 0.75,
+              r: nsx + nameW / 2,
+              b: nsy + fontPx * 1.5,
+            });
+            if (seamEdit || property.showSeams !== false) {
+              const mx = view.tx + (Math.min(...room.points.map((q) => q.x)) + 14 / Math.max(view.scale, 1)) * view.scale;
+              const my = view.ty + (Math.min(...room.points.map((q) => q.y)) + 16 / Math.max(view.scale, 1)) * view.scale;
+              placedLabels.push({ l: mx - 2, t: my - 16, r: mx + 18, b: my + 4 });
+            }
+            const labelLimit = { top: 56, bottom: Math.max(80, size.h - bottomChrome - 18) };
             return (
               <g key={`l${room.id}`}>
                 <text
@@ -1003,7 +1049,7 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {(room.id === selectedRoomId || view.scale >= 14) && layoutWallLabels(edges(room.points), view, placedLabels).map(({ e, x: tx, y: ty }) => {
+                {(room.id === selectedRoomId || view.scale >= 14) && layoutWallLabels(edges(room.points), view, placedLabels, labelLimit).map(({ e, x: tx, y: ty }) => {
                   const label = formatLength(e.length, property.units);
                   const bw = px(label.length * 7.5 + 14);
                   const bh = px(22);
@@ -1189,7 +1235,10 @@ export function PlanEditor({
           {formatLength(Math.abs(drag.end.y - drag.start.y), property.units)}
         </div>
       )}
-      <div className="absolute bottom-3 right-3 flex flex-col gap-2">
+      <div
+        className={`absolute right-3 z-10 flex flex-col gap-2 ${padOpen ? "top-16" : ""}`}
+        style={padOpen ? undefined : { bottom: bottomChrome + 8 }}
+      >
         <ZoomBtn label="+" onClick={() => zoomBy(1.4)} />
         <ZoomBtn label="−" onClick={() => zoomBy(1 / 1.4)} />
         <ZoomBtn label="Fit" onClick={fit} />
