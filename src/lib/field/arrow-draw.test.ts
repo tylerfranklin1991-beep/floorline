@@ -8,6 +8,7 @@ import {
   closetRectangle,
   closetRectPoints,
   closeDraft,
+  describeClose,
   restoreDraftHistory,
   commitDraft,
   directionVector,
@@ -96,7 +97,7 @@ test("close room reports the square-close gap, not the straight line home", () =
   if (closed.event !== "closed") return;
   near(closed.closingError, 0.5);
   assert.equal(formatLength(closed.closingError, "ft"), `0'-6"`);
-  assert.equal(`Closed. Gap ${formatLength(closed.closingError, "ft")}.`, `Closed. Gap 0'-6".`);
+  assert.equal(describeClose(d.points, "ft"), `10' to the start, 0'-6" off square`);
 });
 
 test("close room explains a self-crossing outline instead of closing it", () => {

@@ -738,7 +738,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     <div className="relative flex min-h-0 w-full max-w-full flex-1 flex-col overflow-hidden bg-[#f6f2e8]">
       <header
         className="flex w-full min-w-0 items-center gap-0.5 overflow-hidden border-b border-black/10 bg-white px-1 py-1"
-        style={{ paddingTop: "max(0.25rem, env(safe-area-inset-top))" }}
+        style={{ paddingTop: "max(1.25rem, env(safe-area-inset-top))" }}
       >
         <IconBtn label="Back to properties" onClick={() => openProperty(null)}>
           <ArrowLeft />
@@ -788,7 +788,6 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div className="pointer-events-none absolute left-2 top-2 z-20 max-w-[calc(100%-1rem)]">
-          <div className="pointer-events-auto">
             <LaserReadout
               label={
                 laserNote?.label ||
@@ -797,7 +796,6 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               detail={laserNote?.detail ?? null}
               onReshoot={laserNote?.reshoot ? reshoot : null}
             />
-          </div>
         </div>
         <PlanEditor
           property={property}
@@ -877,13 +875,12 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
               }));
               select(committed.room.id);
               setFocusWall(0);
-              const gap = formatLength(committed.closingError, property.units);
               setLaserNote({
                 label: committed.room.name,
-                detail: `Closed. Gap to the start was ${gap}.`,
+                detail: `Closed. ${committed.closeText}.`,
                 reshoot: false,
               });
-              toast.success(`${committed.room.name} closed · gap ${gap}`);
+              toast.success(`${committed.room.name} closed · ${committed.closeText}`);
             }}
             onClose={() => setArrowOn(false)}
           />

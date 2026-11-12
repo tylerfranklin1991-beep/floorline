@@ -88,22 +88,22 @@ export function LaserReadout({
   onReshoot: (() => void) | null;
 }) {
   const disto = useDisto();
-  const live =
-    disto.status === "connected" ||
+  const urgent =
     disto.status === "connecting" ||
     disto.status === "scanning" ||
     Boolean(disto.error) ||
-    (Boolean(detail) && disto.status !== "off" && disto.status !== "disconnected");
-  if (!live) {
+    Boolean(detail);
+  if (!urgent) {
+    const idle = disto.status === "connected" ? disto.name || "DISTO" : "Laser idle";
     return (
-      <div className="pointer-events-none inline-flex items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
-        <span className={`size-2 rounded-full ${dotClass(disto.status)}`} />
-        Laser idle
+      <div className="pointer-events-none inline-flex max-w-[11rem] items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+        <span className={`size-2 shrink-0 rounded-full ${dotClass(disto.status)}`} />
+        <span className="truncate">{idle}</span>
       </div>
     );
   }
   return (
-    <div className="flex items-center gap-3 border-b border-black/10 bg-[#1c1b18] px-3 py-2 text-white shadow">
+    <div className="pointer-events-none flex max-w-full items-center gap-3 rounded-2xl bg-[#1c1b18]/95 px-3 py-2 text-white shadow">
       <span className={`size-2.5 shrink-0 rounded-full ${dotClass(disto.status)}`} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-2xl font-bold leading-tight">{label}</div>
@@ -119,7 +119,7 @@ export function LaserReadout({
         <button
           type="button"
           onClick={onReshoot}
-          className="h-11 shrink-0 rounded-full bg-white px-4 text-sm font-bold text-black"
+          className="pointer-events-auto h-11 shrink-0 rounded-full bg-white px-4 text-sm font-bold text-black"
         >
           Re-shoot
         </button>
@@ -324,7 +324,6 @@ export function ArrowSheet({
       return;
     }
     if (result.event === "closed" && result.draft.roomClosed && !result.draft.closetChain) {
-      if (draftKey) localStorage.removeItem(draftKey);
       const done = commitDraft(result.draft, {
         name: committedName.trim() || "Room",
         levelId,
@@ -337,12 +336,8 @@ export function ArrowSheet({
         return;
       }
       onCommit(done.committed);
-      const fresh = draftHistory(result.draft.headingDeg);
-      setHist(fresh);
-      publish(fresh.present);
-      setNote(`Closed. Gap ${formatLength(result.closingError, units)}.`);
-      setPanel("pad");
-      setArm("wall");
+      if (draftKey) localStorage.removeItem(draftKey);
+      onClose();
       return;
     }
     setHist(pushDraft(histRef.current, result.draft));
@@ -439,7 +434,51 @@ export function ArrowSheet({
   };
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 max-h-[68%] overflow-hidden border-t border-black/10 bg-[#fbf7ed] shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
+    <div className="absolute inset-x-0 bottom-8 z-30 max-h-[68%] overflow-visible rounded-t-2xl border-t border-black/10 bg-[#fbf7ed] pb-1 shadow-[0_-8px_24px_rgba(0,0,0,0.12)]">
+      {(ask || closeBlock || note) && (
+        <div className="absolute inset-x-2 bottom-full z-10 mb-2 rounded-xl bg-[#f3dcc3] p-2 shadow">
+          {ask ? (
+            <div className="flex items-center gap-2">
+              <p className="min-w-0 flex-1 text-sm font-semibold">
+                {ask === "x" ? "Keep this draft, or discard it?" : "Discard this drawing?"}
+              </p>
+              {ask === "x" ? (
+                <button type="button" onClick={() => { setAsk(null); onClose(); }} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
+                  Keep draft
+                </button>
+              ) : (
+                <button type="button" onClick={() => setAsk(null)} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
+                  Cancel
+                </button>
+              )}
+              <button type="button" onClick={discardDraft} className="h-11 shrink-0 rounded-xl bg-black px-3 text-sm font-bold text-white">
+                Discard
+              </button>
+            </div>
+          ) : closeBlock ? (
+            <>
+              <p className="text-sm font-semibold">{closeBlock}</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    undoRef.current?.();
+                    setCloseBlock(null);
+                  }}
+                  className="h-11 rounded-xl bg-white text-sm font-bold"
+                >
+                  Undo last wall
+                </button>
+                <button type="button" onClick={() => setAsk("discard")} className="h-11 rounded-xl bg-black text-sm font-bold text-white">
+                  Discard draft
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm font-semibold">{note}</p>
+          )}
+        </div>
+      )}
       <header className="flex items-center gap-1 bg-white px-2 py-1">
         <button type="button" aria-label={compact ? "Show drawing pad" : "Hide drawing pad"} onClick={() => setCompact((v) => !v)} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-black/5 text-lg">
           {compact ? "▴" : "▾"}
@@ -458,54 +497,22 @@ export function ArrowSheet({
         <button type="button" onClick={() => undoRef.current?.()} disabled={hist.past.length === 0} className="h-10 shrink-0 rounded-full bg-black/5 px-3 text-sm font-semibold disabled:opacity-40">
           Undo
         </button>
-        <button type="button" aria-label="Close draw with laser" onClick={() => setAsk("x")} className="flex size-10 shrink-0 items-center justify-center rounded-full bg-black/5">
+        <button
+          type="button"
+          aria-label="Close draw with laser"
+          onClick={() => {
+            if (chain.length <= 1 && !draft.closetChain) onClose();
+            else setAsk("x");
+          }}
+          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-black/5"
+        >
           <X />
         </button>
       </header>
       {!compact && (
       <div className={panel === "pad" ? "space-y-1.5 overflow-hidden px-2 pb-2 pt-1.5" : "max-h-[46vh] space-y-3 overflow-y-auto p-3"}>
-        {ask && (
-          <div className="flex items-center gap-2 rounded-xl bg-[#f3dcc3] p-2">
-            <p className="min-w-0 flex-1 text-sm font-semibold">
-              {ask === "x" ? "Keep this draft, or discard it?" : "Discard this drawing?"}
-            </p>
-            {ask === "x" ? (
-              <button type="button" onClick={() => { setAsk(null); onClose(); }} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
-                Keep draft
-              </button>
-            ) : (
-              <button type="button" onClick={() => setAsk(null)} className="h-11 shrink-0 rounded-xl bg-white px-3 text-sm font-bold">
-                Cancel
-              </button>
-            )}
-            <button type="button" onClick={discardDraft} className="h-11 shrink-0 rounded-xl bg-black px-3 text-sm font-bold text-white">
-              Discard
-            </button>
-          </div>
-        )}
-        {note && !closeBlock && <p className="rounded-xl bg-[#f3dcc3] px-3 py-1.5 text-sm font-semibold">{note}</p>}
         {panel === "pad" && (
           <>
-            {closeBlock && (
-              <div className="rounded-xl bg-[#f3dcc3] p-2">
-                <p className="text-sm font-semibold">{closeBlock}</p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      undoRef.current?.();
-                      setCloseBlock(null);
-                    }}
-                    className="h-11 rounded-xl bg-white text-sm font-bold"
-                  >
-                    Undo last wall
-                  </button>
-                  <button type="button" onClick={() => setAsk("discard")} className="h-11 rounded-xl bg-black text-sm font-bold text-white">
-                    Discard draft
-                  </button>
-                </div>
-              </div>
-            )}
             <div className="grid grid-cols-3 gap-2">
               {(["up-left", "up", "up-right", "left", "center", "right", "down-left", "down", "down-right"] as const).map((id) => {
                 if (id === "center") {
@@ -560,14 +567,14 @@ export function ArrowSheet({
                 <button
                   type="button"
                   onClick={() => {
-                    const n = parseLength(lengthText, units);
-                    if (n == null) {
-                      setNote("Couldn't read that simulated reading.");
-                      return;
-                    }
+                    const typed = parseLength(lengthText, units);
+                    const n =
+                      typed ??
+                      (units === "ft"
+                        ? 8 + Math.floor(Math.random() * 7) + (Math.random() < 0.5 ? 0 : 0.5)
+                        : Math.round((2.4 + Math.random() * 1.8) * 100) / 100);
                     const err = publishMockMeters(planToMeters(n, units));
                     if (err) setNote(err);
-                    else setLengthText("");
                   }}
                   className="h-11 shrink-0 rounded-xl bg-[#b4561d] px-3 text-sm font-bold text-white"
                 >
@@ -586,11 +593,9 @@ export function ArrowSheet({
                 Close room
               </button>
             </div>
-            {!closeBlock && (
-              <button type="button" onClick={() => setAsk("discard")} className="h-10 w-full rounded-xl text-sm font-semibold text-[#8a3b12]">
-                Discard draft
-              </button>
-            )}
+            <button type="button" onClick={() => setAsk("discard")} className="h-10 w-full rounded-xl text-sm font-semibold text-[#8a3b12]">
+              Discard draft
+            </button>
           </>
         )}
         {panel === "opening" && (
