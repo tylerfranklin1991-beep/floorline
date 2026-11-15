@@ -292,20 +292,38 @@ export function levelView(p: FieldProperty, levelId: string): FieldProperty {
   };
 }
 
-export function levelName(p: FieldProperty, levelId: string | null): string {
-  return p.levels.find((l) => l.id === levelId)?.name ?? "";
-}
-
 /** Suggested name for the next level ("Basement", "2nd floor", ...). */
 export function nextLevelName(p: FieldProperty): string {
   const used = new Set(p.levels.map((l) => l.name.toLowerCase()));
   return LEVEL_PRESETS.find((n) => !used.has(n.toLowerCase())) ?? `Level ${p.levels.length + 1}`;
 }
 
+/**
+ * A closet whose parent room is gone becomes an ordinary room. Leaving the
+ * link in place makes billableArea return 0, so the closet's square footage
+ * disappears until the next reload (sanitize already drops the link).
+ */
+function detachOrphanClosets(rooms: FieldRoom[]): FieldRoom[] {
+  const ids = new Set(rooms.map((r) => r.id));
+  return rooms.map((room) => {
+    if (!room.closet || (room.closet.parentId !== room.id && ids.has(room.closet.parentId))) return room;
+    const next = { ...room };
+    delete next.closet;
+    return next;
+  });
+}
+
+/** Remove one room, its openings, and closet links that pointed at it. */
+export function removeRoom(p: FieldProperty, id: string): FieldProperty {
+  const rooms = detachOrphanClosets(p.rooms.filter((r) => r.id !== id));
+  const ids = new Set(rooms.map((r) => r.id));
+  return { ...p, rooms, openings: p.openings.filter((o) => ids.has(o.roomId)) };
+}
+
 /** Remove a level and everything on it. Refuses to remove the last level. */
 export function removeLevel(p: FieldProperty, levelId: string): FieldProperty {
   if (p.levels.length <= 1 || !p.levels.some((l) => l.id === levelId)) return p;
-  const rooms = p.rooms.filter((r) => r.levelId !== levelId);
+  const rooms = detachOrphanClosets(p.rooms.filter((r) => r.levelId !== levelId));
   const ids = new Set(rooms.map((r) => r.id));
   return {
     ...p,
@@ -1137,19 +1155,15 @@ export function sanitizeProperty(value: unknown): FieldProperty | null {
         : {}),
     });
   }
-  const ids = new Set(rooms.map((r) => r.id));
-  for (const room of rooms) {
-    if (room.closet && (room.closet.parentId === room.id || !ids.has(room.closet.parentId))) {
-      delete room.closet;
-    }
-  }
+  const cleanedRooms = detachOrphanClosets(rooms);
+  const ids = new Set(cleanedRooms.map((r) => r.id));
   return {
     id: v.id,
     name: typeof v.name === "string" ? v.name : "Property",
     address: typeof v.address === "string" ? v.address : "",
     ...(sanitizeGeo(v.location) ? { location: sanitizeGeo(v.location) } : {}),
     units: v.units === "m" ? "m" : "ft",
-    rooms,
+    rooms: cleanedRooms,
     openings: Array.isArray(v.openings)
       ? v.openings
           .filter((o) => o && ids.has(o.roomId))

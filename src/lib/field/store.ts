@@ -5,6 +5,7 @@ import {
   convertProperty,
   newProperty,
   removeLevel,
+  removeRoom,
   uid,
   type FieldStairs,
   sanitizeProperty,
@@ -278,11 +279,7 @@ export const useField = create<FieldState>()(
             rooms: p.rooms.map((r) => (r.id === id ? { ...r, ...patch } : r)),
           })),
         deleteRoom: (id) => {
-          get().change((p) => ({
-            ...p,
-            rooms: p.rooms.filter((r) => r.id !== id),
-            openings: p.openings.filter((o) => o.roomId !== id),
-          }));
+          get().change((p) => removeRoom(p, id));
           set({ selectedRoomId: null, selectedOpeningId: null });
         },
         duplicateRoom: (id) => {

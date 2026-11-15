@@ -4,7 +4,7 @@
  * Pure and undoable — the UI keeps a history of Draft values.
  */
 
-import { commit, initHistory, redo, undo, type History } from "./history.ts";
+import { commit, initHistory, undo, type History } from "./history.ts";
 import {
   area,
   bbox,
@@ -449,10 +449,6 @@ export function pushDraft(h: History<Draft>, next: Draft): History<Draft> {
 
 export function undoDraft(h: History<Draft>): History<Draft> {
   return undo(h);
-}
-
-export function redoDraft(h: History<Draft>): History<Draft> {
-  return redo(h);
 }
 
 /** Where the next laser shot would land, for the on-plan preview arrow. */

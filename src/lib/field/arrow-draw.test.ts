@@ -151,7 +151,7 @@ test("custom 30° segment and a DISTO float both extend the chain", () => {
 });
 
 test("opening on the current wall keeps width, center offset, and transition", () => {
-  let d = must(shoot({ ...blankDraft(90), headingDeg: 90 }, 12, "ft")).draft;
+  const d = must(shoot({ ...blankDraft(90), headingDeg: 90 }, 12, "ft")).draft;
   const placed = addOpening(d, { kind: "cased", width: 3, offset: 4, transition: "t-mold", id: "o1" });
   assert.equal(placed.ok, true);
   if (!placed.ok) return;

@@ -4,7 +4,7 @@
  * accelerometer magnitude, heading smoothing, path integration, and turning
  * a traced perimeter into a rough rectilinear room polygon.
  */
-import { bbox, nearestWall, rectilinearize, type Pt } from "./model";
+import { bbox, rectilinearize, type Pt } from "./model";
 
 export const DEFAULT_STRIDE_M = 0.7;
 export const FT_PER_M = 1 / 0.3048;
@@ -198,11 +198,6 @@ export function roomFromTrace(
 /** Rotate plan points into the room frame used by roomFromTrace. */
 export function toFrame(p: Pt, frameAngle: number): Pt {
   return rotate(p, -frameAngle);
-}
-
-/** Where a doorway at point `p` sits on a room outline. */
-export function doorwayOn(points: Pt[], p: Pt) {
-  return nearestWall(points, p);
 }
 
 /** Stride from a calibration walk; null if the numbers make no sense. */
