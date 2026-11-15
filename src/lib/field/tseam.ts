@@ -8,14 +8,7 @@
  *
  * The older `carpetLayout` is unchanged. This is a separate cut list.
  */
-import {
-  billableArea,
-  crossSection,
-  ftToUnits,
-  roomFlooring,
-  seamShift,
-  toSqFt,
-} from "./materials.ts";
+import { crossSection, ftToUnits, roomFlooring, seamShift, toSqFt } from "./materials.ts";
 import {
   area,
   bbox,
@@ -566,9 +559,4 @@ export function normalizePile(deg: number): 0 | 90 {
 /** Lowest-waste direction for one room. Used by the Auto button. */
 export function autoPile(points: Pt[], opt: Omit<TseamOptions, "pileDeg">): 0 | 90 {
   return layoutTseam(points, { ...opt, pileDeg: "auto" }).pileDeg;
-}
-
-/** Sq ft this layout is billing, for tests and the quote. */
-export function roomNetSf(p: FieldProperty, room: FieldRoom): number {
-  return round2(toSqFt(billableArea(p, room), p.units));
 }

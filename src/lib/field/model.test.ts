@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { areaSummary } from "./materials.ts";
 import {
   area,
   bbox,
@@ -10,10 +11,13 @@ import {
   magnetOffset,
   moveCorner,
   newProperty,
+  newRoom,
   outlineFromWalk,
   parseLength,
   rectPoints,
   rectilinearize,
+  removeLevel,
+  removeRoom,
   sanitizeProperty,
   setWallLength,
   closureGap,
@@ -222,6 +226,65 @@ describe("lengths", () => {
     });
     assert.equal(ok?.rooms.length, 0);
     assert.equal(ok?.openings.length, 0);
+  });
+});
+
+describe("deleting a room", () => {
+  it("keeps an included closet's area after its parent room is deleted", () => {
+    const p = newProperty("Job");
+    const parent = newRoom("MBR", rectPoints(0, 0, 12, 10), "typed");
+    const closet = newRoom("MBR closet", rectPoints(12, 0, 4, 6), "typed");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    closet.flooring = { material: "none" };
+    p.rooms = [parent, closet];
+    p.openings = [
+      { id: "door", roomId: parent.id, kind: "door", wall: 0, offset: 2, width: 3 },
+      { id: "closet-door", roomId: closet.id, kind: "door", wall: 0, offset: 1, width: 2 },
+    ];
+    assert.equal(areaSummary(p).total, 144);
+    const next = removeRoom(p, parent.id);
+    assert.equal(next.rooms.length, 1);
+    assert.equal(next.rooms[0].id, closet.id);
+    assert.equal(next.rooms[0].closet, undefined);
+    assert.equal(areaSummary(next).total, 24);
+    assert.deepEqual(
+      next.openings.map((o) => o.id),
+      ["closet-door"],
+    );
+  });
+
+  it("drops a closet link when the parent room's level is removed", () => {
+    const p = newProperty("Job");
+    p.levels.push({ id: "up", name: "2nd floor" });
+    const parent = newRoom("MBR", rectPoints(0, 0, 12, 10), "typed", "level-main");
+    const closet = newRoom("MBR closet", rectPoints(0, 0, 4, 6), "typed", "up");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    p.rooms = [parent, closet];
+    const next = removeLevel(p, "level-main");
+    assert.equal(next.rooms.length, 1);
+    assert.equal(next.rooms[0].closet, undefined);
+    assert.equal(areaSummary(next).total, 24);
+  });
+
+  it("still drops a closet link that points at a missing room when a save is loaded", () => {
+    const ok = sanitizeProperty({
+      id: "p",
+      rooms: [
+        {
+          id: "c",
+          name: "Closet",
+          points: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 6 },
+            { x: 0, y: 6 },
+          ],
+          closet: { parentId: "gone", includeInParent: true },
+        },
+      ],
+    });
+    assert.equal(ok?.rooms[0].closet, undefined);
+    assert.equal(ok && areaSummary(ok).total, 24);
   });
 });
 
