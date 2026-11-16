@@ -5,7 +5,6 @@ export const OPENING_LABEL = { door: "Door", window: "Window", opening: "Doorway
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  area,
   edges,
   formatArea,
   formatLength,
@@ -20,6 +19,7 @@ import {
 } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
 import {
+  listedArea,
   roomFlooring,
   TRANSITION_LABEL,
   transitions,
@@ -197,7 +197,7 @@ export function RoomPanel({
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-sm uppercase tracking-wide text-black/50">
-            Room · {formatArea(area(room.points), u)}
+            Room · {formatArea(listedArea(property, room), u)}
           </div>
           <div className="text-xs text-black/40">
             {room.source === "ar"

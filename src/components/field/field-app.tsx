@@ -31,7 +31,6 @@ import { toast } from "sonner";
 import { isArSupported } from "@/lib/field/ar";
 import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
-  area,
   bbox,
   edges,
   formatArea,
@@ -40,6 +39,7 @@ import {
   levelView,
   nearestWall,
   nextLevelName,
+  nextRoomName,
   nextRoomOrigin,
   newRoom,
   parseLength,
@@ -73,7 +73,7 @@ import { QuoteSheet } from "./quote-sheet";
 import { SeamDock } from "./seam-dock";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
-import { areaSummary } from "@/lib/field/materials";
+import { areaSummary, listedArea } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
 import { RoomPanel, LengthInput, SquareUpButton } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
@@ -273,10 +273,7 @@ function HomeScreen() {
               <div className="text-lg font-semibold">{p.name}</div>
               <div className="text-sm text-black/50">
                 {p.rooms.length} room{p.rooms.length === 1 ? "" : "s"} ·{" "}
-                {formatArea(
-                  p.rooms.reduce((s, r) => s + area(r.points), 0),
-                  p.units,
-                )}{" "}
+                {formatArea(areaSummary(p).total, p.units)}{" "}
                 · {new Date(p.updatedAt).toLocaleDateString()}
               </div>
             </button>
@@ -352,7 +349,7 @@ function SelectionBar({
       ? `${stairs.steps} steps`
       : ""
     : room
-      ? formatArea(area(room.points), property.units)
+      ? formatArea(listedArea(property, room), property.units)
       : "";
   return (
     <div
@@ -643,7 +640,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo]);
 
-  const nextName = () => `Room ${property.rooms.length + 1}`;
+  const nextName = () => nextRoomName(property.rooms);
 
   /** "Next room": the next room on this floor, or start adding a new one. */
   const nextRoom = () => {
@@ -1067,7 +1064,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <WalkMode
           units={property.units}
           firstName={capture.name}
-          roomCount={property.rooms.length}
+          roomCount={property.rooms.filter((r) => !r.closet).length}
           onCancel={() => setCapture(null)}
           onDone={(walked, doorWidth) => {
             setCapture(null);

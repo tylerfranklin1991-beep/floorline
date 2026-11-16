@@ -5,6 +5,7 @@ import {
   advanceLaserTarget,
   blankDraft,
   closetCaption,
+  planClosetLabel,
   closetRectangle,
   closetRectPoints,
   closeDraft,
@@ -171,6 +172,8 @@ test("closet width × depth hangs off the wall and captions its own area", () =>
   if (!added.ok) return;
   const pts = added.closet.points;
   const caption = closetCaption("MBR", "closet", pts, "ft");
+  assert.equal(planClosetLabel("Room 6 closet", pts, "ft").startsWith("Closet "), true);
+  assert.ok(!planClosetLabel("Room 6 closet", pts, "ft").includes("×"));
   assert.match(caption, /^MBR closet 6'-7" × 7'-4" = \d+\.\d{2} sf$/);
   assert.ok(Math.abs(area(pts) - (6 + 7 / 12) * (7 + 4 / 12)) < 0.06);
   const rect = closetRectPoints({ x: 0, y: 0 }, { x: 10, y: 0 }, 4, 3, true);
