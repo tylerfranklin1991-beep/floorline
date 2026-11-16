@@ -26,7 +26,6 @@ import { isArSupported } from "@/lib/field/ar";
 import { hasNativeArScan } from "@/lib/field/arcore";
 import { exportJson, exportPng, printPdf, sharePng } from "@/lib/field/export";
 import {
-  area,
   bbox,
   edges,
   formatArea,
@@ -35,6 +34,7 @@ import {
   levelView,
   nearestWall,
   nextLevelName,
+  nextRoomName,
   nextRoomOrigin,
   newRoom,
   parseLength,
@@ -66,7 +66,7 @@ import { QuoteSheet } from "./quote-sheet";
 import { SeamDock } from "./seam-dock";
 import { JobSettingsSheet } from "./job-settings";
 import { sharePdf } from "@/lib/field/pdf";
-import { areaSummary } from "@/lib/field/materials";
+import { areaSummary, listedArea } from "@/lib/field/materials";
 import { PlanEditor, type EditorMode } from "./plan-editor";
 import { RoomPanel, LengthInput, SquareUpButton } from "./room-panel";
 import { StairsPanel } from "./stairs-panel";
@@ -256,10 +256,7 @@ function HomeScreen() {
               <div className="text-lg font-semibold">{p.name}</div>
               <div className="text-sm text-black/50">
                 {p.rooms.length} room{p.rooms.length === 1 ? "" : "s"} ·{" "}
-                {formatArea(
-                  p.rooms.reduce((s, r) => s + area(r.points), 0),
-                  p.units,
-                )}{" "}
+                {formatArea(areaSummary(p).total, p.units)}{" "}
                 · {new Date(p.updatedAt).toLocaleDateString()}
               </div>
             </button>
@@ -333,7 +330,7 @@ function SelectionBar({
       ? `${stairs.steps} steps`
       : ""
     : room
-      ? formatArea(area(room.points), property.units)
+      ? formatArea(listedArea(property, room), property.units)
       : "";
   return (
     <div
@@ -594,7 +591,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
     setLaserNote((n) => (n ? { ...n, detail: "Ready — press DIST to re-shoot.", reshoot: false } : n));
   };
 
-  const nextName = () => `Room ${property.rooms.length + 1}`;
+  const nextName = () => nextRoomName(property.rooms);
 
   const placeRoom = async (
     name: string,
@@ -894,7 +891,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       {adding && (
         <AddRoomSheet
           units={property.units}
-          defaultName={`Room ${property.rooms.length + 1}`}
+          defaultName={nextName()}
           onClose={() => setAdding(false)}
           onPick={(how, name, size) => {
             setAdding(false);
@@ -944,7 +941,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <ArCoreScan
           units={property.units}
           firstName={capture.name}
-          roomCount={property.rooms.length}
+          roomCount={property.rooms.filter((r) => !r.closet).length}
           onCancel={(reason) => {
             setCapture(null);
             if (reason) toast.error(reason);
@@ -960,7 +957,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
         <WalkMode
           units={property.units}
           firstName={capture.name}
-          roomCount={property.rooms.length}
+          roomCount={property.rooms.filter((r) => !r.closet).length}
           onCancel={() => setCapture(null)}
           onDone={(walked, doorWidth) => {
             setCapture(null);

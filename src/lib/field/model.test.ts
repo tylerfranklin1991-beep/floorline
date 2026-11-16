@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { areaSummary } from "./materials.ts";
+import { areaSummary, listedArea } from "./materials.ts";
 import {
   area,
   bbox,
@@ -12,6 +12,8 @@ import {
   moveCorner,
   newProperty,
   newRoom,
+  nextRoomName,
+  roomAtPoint,
   outlineFromWalk,
   parseLength,
   rectPoints,
@@ -285,6 +287,52 @@ describe("deleting a room", () => {
     });
     assert.equal(ok?.rooms[0].closet, undefined);
     assert.equal(ok && areaSummary(ok).total, 24);
+  });
+});
+
+describe("taps and room names", () => {
+  it("picks the smallest polygon that contains the point", () => {
+    const room = { id: "room", points: rectPoints(0, 0, 10, 8) };
+    const closet = { id: "closet", points: rectPoints(10, 2, 4, 2) };
+    const notch = {
+      id: "l",
+      points: [
+        { x: 20, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 5 },
+        { x: 25, y: 5 },
+        { x: 25, y: 10 },
+        { x: 20, y: 10 },
+      ],
+    };
+    const rooms = [closet, room, notch];
+    assert.equal(roomAtPoint(rooms, { x: 3, y: 3 })?.id, "room");
+    assert.equal(roomAtPoint(rooms, { x: 11, y: 3 })?.id, "closet");
+    assert.equal(roomAtPoint(rooms, { x: 28, y: 8 }), null);
+    const overlap = { id: "inside", points: rectPoints(2, 2, 2, 2) };
+    assert.equal(roomAtPoint([room, overlap], { x: 3, y: 3 })?.id, "inside");
+  });
+
+  it("numbers the next room from the rooms, not their closets", () => {
+    const rooms = [
+      { name: "Room 6" },
+      { name: "Room 6 closet", closet: { parentId: "r", includeInParent: true } },
+    ];
+    assert.equal(nextRoomName(rooms), "Room 7");
+    const numbered = [1, 2, 3, 4, 5, 6].map((n) => ({ name: `Room ${n}` }));
+    assert.equal(nextRoomName([...numbered, rooms[1]]), "Room 7");
+    assert.equal(nextRoomName([]), "Room 1");
+  });
+
+  it("shows one area for a room and the closet it includes", () => {
+    const p = newProperty("Job");
+    const parent = newRoom("Room 6", rectPoints(0, 0, 10, 8), "typed");
+    const closet = newRoom("Room 6 closet", rectPoints(10, 0, 4, 2), "typed");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    p.rooms = [parent, closet];
+    assert.equal(listedArea(p, parent), 88);
+    assert.equal(listedArea(p, closet), 8);
+    assert.equal(areaSummary(p).total, 88);
   });
 });
 

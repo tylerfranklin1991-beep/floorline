@@ -429,6 +429,21 @@ export function pointInPolygon(p: Pt, points: Pt[]): boolean {
   return inside;
 }
 
+/** The room under a tap: the smallest polygon that contains the point, not a bounding box. */
+export function roomAtPoint<T extends { points: Pt[] }>(rooms: T[], p: Pt): T | null {
+  let best: T | null = null;
+  let bestArea = Infinity;
+  for (const room of rooms) {
+    if (room.points.length < 3 || !pointInPolygon(p, room.points)) continue;
+    const a = area(room.points);
+    if (a < bestArea) {
+      best = room;
+      bestArea = a;
+    }
+  }
+  return best;
+}
+
 /** Clockwise in screen coordinates (y down) means positive signed area here. */
 /**
  * L-shaped room: overall w × h with a cw × ch notch cut out of one corner
@@ -873,6 +888,20 @@ export function magnetOffset(
     dx: Number.isFinite(bestX.d) ? round2(bestX.v) : 0,
     dy: Number.isFinite(bestY.d) ? round2(bestY.v) : 0,
   };
+}
+
+/**
+ * Next "Room N". Closets do not take a number, and an existing "Room 6"
+ * is never reused.
+ */
+export function nextRoomName(rooms: { name: string; closet?: unknown }[]): string {
+  const mains = rooms.filter((r) => !r.closet);
+  let n = mains.length;
+  for (const r of mains) {
+    const m = /^Room (\d+)$/.exec(r.name.trim());
+    if (m) n = Math.max(n, Number(m[1]));
+  }
+  return `Room ${n + 1}`;
 }
 
 /** Where to put a new room: to the right of everything that exists. */

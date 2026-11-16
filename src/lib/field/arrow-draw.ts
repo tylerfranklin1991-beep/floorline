@@ -11,6 +11,7 @@ import {
   closureGap,
   edges,
   ensureClockwise,
+  formatArea,
   formatLength,
   isSimple,
   newRoom,
@@ -355,6 +356,13 @@ export function closetPlanLabel(parentName: string, roomName: string, points: Pt
   const prefix = `${parentName} `;
   const short = roomName.startsWith(prefix) ? roomName.slice(prefix.length) : roomName;
   return closetCaption(parentName, short, points, units);
+}
+
+/** Short plan chip. The long caption overlaps the rooms next door. */
+export function planClosetLabel(roomName: string, points: Pt[], units: Units): string {
+  const sq = formatArea(area(points), units);
+  const label = /closet/i.test(roomName) ? "Closet" : roomName.trim() || "Closet";
+  return `${label} ${sq}`;
 }
 
 export type CommitIds = (prefix: string) => string;

@@ -1,9 +1,9 @@
 import { listedArea, roomFlooring } from "@/lib/field/materials";
 import { carpetPlans } from "@/lib/field/tseam";
-import { closetPlanLabel } from "@/lib/field/arrow-draw";
+import { planClosetLabel } from "@/lib/field/arrow-draw";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
-  area,
   bbox,
   centroid,
   defaultOpeningWidth,
@@ -28,6 +28,8 @@ import {
   snapWallLength,
   wallSnapInches,
   pointInPolygon,
+  nextRoomName,
+  roomAtPoint,
   rectPoints,
   snap,
   translate,
@@ -41,7 +43,7 @@ export type EditorMode = "select" | "draw" | "door" | "window" | "opening" | "st
 
 type View = { scale: number; tx: number; ty: number };
 
-type ScreenBox = { l: number; t: number; r: number; b: number };
+type ScreenBox = { l: number; t: number; r: number; b: number; kind?: string };
 
 function boxesOverlap(a: ScreenBox, b: ScreenBox) {
   return a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
@@ -129,7 +131,7 @@ function layoutWallLabels(
     for (const sign of [1, -1]) {
       if (chosen) break;
       for (let step = 0; step < 5 && !chosen; step++) {
-        for (const along of [0, 16, -16]) {
+        for (const along of [0, 44, -44, 88, -88]) {
           if (attempt(sign, 22 + step * 16, along, false)) break;
         }
       }
@@ -140,15 +142,24 @@ function layoutWallLabels(
       }
     }
     if (!chosen && mustShow) {
-      let sx = view.tx + (midX - nx * (16 / scale)) * view.scale;
-      let sy = view.ty + (midY - ny * (16 / scale)) * view.scale;
-      sx = Math.min(Math.max(sx, limits.left + halfW), Math.max(limits.left + halfW, limits.right - halfW));
-      sy = Math.min(Math.max(sy, limits.top + halfH), Math.max(limits.top + halfH, limits.bottom - halfH));
-      chosen = {
-        x: (sx - view.tx) / view.scale,
-        y: (sy - view.ty) / view.scale,
-        box: { l: sx - halfW, t: sy - halfH, r: sx + halfW, b: sy + halfH },
-      };
+      // Nudge along this wall. Clamping every wall onto the same screen edge
+      // stacks the chips on top of each other and on the room name.
+      const spreads = [0, 52, -52, 104, -104, 156, -156];
+      for (const along of spreads) {
+        let sx = view.tx + (midX - nx * (18 / scale) + tx * (along / scale)) * view.scale;
+        let sy = view.ty + (midY - ny * (18 / scale) + ty * (along / scale)) * view.scale;
+        const loX = limits.left + halfW;
+        const hiX = Math.max(loX, limits.right - halfW);
+        const loY = limits.top + halfH;
+        const hiY = Math.max(loY, limits.bottom - halfH);
+        sx = Math.min(Math.max(sx, loX), hiX);
+        sy = Math.min(Math.max(sy, loY), hiY);
+        const box = { l: sx - halfW, t: sy - halfH, r: sx + halfW, b: sy + halfH };
+        if (placed.some((p) => boxesOverlap(box, p))) continue;
+        if (obstacles.some((o) => boxesOverlap(box, o))) continue;
+        chosen = { x: (sx - view.tx) / view.scale, y: (sy - view.ty) / view.scale, box };
+        break;
+      }
     }
     if (!chosen) continue;
     placed.push(chosen.box);
@@ -279,6 +290,7 @@ export function PlanEditor({
           t: r.top - host.top,
           r: r.right - host.left,
           b: r.bottom - host.top,
+          kind: (node as HTMLElement).dataset.planObstacle,
         };
         if (box.r > 4 && box.b > 4 && box.l < host.width - 4 && box.t < host.height - 4) boxes.push(box);
       });
@@ -346,17 +358,40 @@ export function PlanEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx, obstacles]);
 
-  const obstacleKey = obstacles.map((o) => [o.l, o.t, o.r, o.b].map((n) => Math.round(n / 4)).join(",")).join(";");
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  // Selecting a room must not throw away a zoom the user already set. Pan only
+  // when that room is mostly off the screen. This runs before Fit so a new
+  // room's fit still wins on the same tick.
+  useEffect(() => {
+    const room = roomsRef.current.find((r) => r.id === selectedRoomId);
+    if (!room || size.w < 40 || size.h < 40) return;
+    const v = viewRef.current;
+    const b = bbox(room.points);
+    const x0 = v.tx + b.minX * v.scale;
+    const y0 = v.ty + b.minY * v.scale;
+    const x1 = v.tx + b.maxX * v.scale;
+    const y1 = v.ty + b.maxY * v.scale;
+    const visW = Math.max(0, Math.min(x1, size.w) - Math.max(x0, 0));
+    const visH = Math.max(0, Math.min(y1, size.h) - Math.max(y0, 0));
+    const frac = (visW * visH) / Math.max(1, (x1 - x0) * (y1 - y0));
+    if (frac >= 0.4) return;
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    setView({ scale: v.scale, tx: size.w / 2 - cx * v.scale, ty: size.h / 2 - cy * v.scale });
+    // size is read when the selection changes; a keyboard resize must not pan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomId]);
 
-  // Fit when the job changes or the user asks. A keyboard or menu must not
+  // Fit when the job changes or the user asks. A keyboard, the room bar, or a menu must not
   // zoom the plan just because the canvas element changed size.
   useEffect(() => {
     if (!measured.current || size.w < 40 || size.h < 40) return;
-    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}|${obstacleKey}`;
+    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}`;
     if (fitKey.current === key) return;
     fitKey.current = key;
     fit();
-  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx, obstacleKey]);
+  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -369,7 +404,7 @@ export function PlanEditor({
     [view],
   );
 
-  const roomAt = (p: Pt) => [...property.rooms].reverse().find((r) => pointInPolygon(p, r.points));
+  const roomAt = (p: Pt) => roomAtPoint(property.rooms, p);
 
   const noteSlop = (e: { clientX: number; clientY: number }) => {
     const d = Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y);
@@ -398,10 +433,12 @@ export function PlanEditor({
     }
     const p = toPlan(e);
     const target = (e.target as Element).closest("[data-h]") as HTMLElement | null;
-    const h = target?.dataset.h;
+    let h = target?.dataset.h;
     const room = target?.dataset.room
       ? property.rooms.find((r) => r.id === target.dataset.room)
       : undefined;
+    const inside = roomAt(p);
+    if (inside && room && room.id !== inside.id && h && h !== "seam") h = undefined;
 
     if (mode === "draw") {
       const s = { x: snap(p.x, step), y: snap(p.y, step) };
@@ -440,7 +477,11 @@ export function PlanEditor({
           width: defaultOpeningWidth(mode, property.units),
         });
         select(best.roomId, null);
+        const placed = mode === "door" ? "Door" : mode === "window" ? "Window" : "Opening";
+        toast.success(`${placed} placed on wall ${best.wall + 1}`);
         onModeDone();
+      } else {
+        toast.error("Tap closer to a wall to place it.");
       }
       return;
     }
@@ -681,7 +722,7 @@ export function PlanEditor({
       const h = Math.abs(drag.end.y - drag.start.y);
       if (w >= step * 2 && h >= step * 2) {
         addRoom(
-          newRoom(drawName || `Room ${property.rooms.length + 1}`, rectPoints(x, y, w, h), "draw"),
+          newRoom(drawName || nextRoomName(property.rooms), rectPoints(x, y, w, h), "draw"),
         );
         onModeDone();
       }
@@ -758,6 +799,8 @@ export function PlanEditor({
 
   const px = (n: number) => n / view.scale;
   const selected = property.rooms.find((r) => r.id === selectedRoomId);
+  const laser = obstacles.find((o) => o.kind === "laser");
+  const zoomTop = laser && laser.r > size.w - 176 ? Math.min(size.h * 0.35, laser.b + 8) : 8;
 
   return (
     <div
@@ -1003,7 +1046,10 @@ export function PlanEditor({
               const fontPx = fs0 * view.scale;
               const nsx = view.tx + c0.x * view.scale;
               const nsy = view.ty + c0.y * view.scale;
-              const nameW = Math.max(36, room.name.length * fontPx * 0.56);
+              const caption = room.closet
+                ? planClosetLabel(room.name, room.points, property.units)
+                : room.name;
+              const nameW = Math.max(36, caption.length * fontPx * 0.56);
               placedLabels.push({
                 l: nsx - nameW / 2,
                 t: nsy - fontPx * 0.75,
@@ -1074,20 +1120,8 @@ export function PlanEditor({
                     pointerEvents="none"
                   >
                     {room.closet
-                      ? closetPlanLabel(
-                          property.rooms.find((r) => r.id === room.closet?.parentId)?.name ?? "Room",
-                          room.name,
-                          room.points,
-                          property.units,
-                        )
-                      : formatArea(
-                          property.rooms.some(
-                            (c) => c.closet?.parentId === room.id && c.closet.includeInParent,
-                          )
-                            ? listedArea(property, room)
-                            : area(room.points),
-                          property.units,
-                        )}
+                      ? planClosetLabel(room.name, room.points, property.units)
+                      : formatArea(listedArea(property, room), property.units)}
                   </text>
                 {view.scale >= 18 && room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
@@ -1258,7 +1292,11 @@ export function PlanEditor({
           {formatLength(Math.abs(drag.end.y - drag.start.y), property.units)}
         </div>
       )}
-      <div data-plan-obstacle="zoom" className="absolute right-2 top-2 z-20 flex flex-row gap-2">
+      <div
+        data-plan-obstacle="zoom"
+        className="absolute right-2 z-20 flex flex-row gap-2"
+        style={{ top: zoomTop }}
+      >
         <ZoomBtn label="+" onClick={() => zoomBy(1.4)} />
         <ZoomBtn label="−" onClick={() => zoomBy(1 / 1.4)} />
         <ZoomBtn label="Fit" onClick={fit} />

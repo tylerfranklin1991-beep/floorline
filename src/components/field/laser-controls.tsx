@@ -1,5 +1,6 @@
 import { Ruler, X } from "lucide-react";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { toast } from "sonner";
 import {
   HEADINGS,
   addOpening,
@@ -586,7 +587,16 @@ export function ArrowSheet({
               <button type="button" onClick={() => { setPanel("opening"); setArm("open-width"); setCloseBlock(null); }} className="h-11 rounded-xl bg-white text-sm font-semibold">
                 Add opening
               </button>
-              <button type="button" onClick={() => { setPanel("closet"); setArm("closet-width"); setCloseBlock(null); }} className="h-11 rounded-xl bg-white text-sm font-semibold">
+              <button type="button" onClick={() => {
+                setPanel("closet");
+                setArm("closet-width");
+                setCloseBlock(null);
+                if (!draft.closetInclude) {
+                  const next = { ...draft, closetInclude: true };
+                  setHist({ ...hist, present: next });
+                  publish(next);
+                }
+              }} className="h-11 rounded-xl bg-white text-sm font-semibold">
                 Add closet
               </button>
               <button type="button" onClick={tryClose} className="h-11 rounded-xl bg-[#b4561d] text-sm font-bold text-white">
@@ -610,6 +620,7 @@ export function ArrowSheet({
             transition={transition}
             setTransition={setTransition}
             onArm={(next) => setArm(next)}
+            note={note}
             onCancel={() => { setPanel("pad"); setArm("wall"); }}
             onPlace={() => {
               const width = parseLength(widthText, units);
@@ -627,7 +638,9 @@ export function ArrowSheet({
               publish(placed.draft);
               setPanel("pad");
               setArm("wall");
-              setNote(`${kind === "door" ? "Door" : kind === "cased" ? "Cased opening" : "Opening"} placed on wall ${placed.draft.openings.at(-1)!.wall + 1}.`);
+              const message = `${kind === "door" ? "Door" : kind === "cased" ? "Cased opening" : "Opening"} placed on wall ${placed.draft.openings.at(-1)!.wall + 1}.`;
+              setNote(message);
+              toast.success(message);
             }}
           />
         )}
@@ -702,6 +715,7 @@ function OpeningForm({
   transition,
   setTransition,
   onArm,
+  note,
   onCancel,
   onPlace,
 }: {
@@ -715,6 +729,7 @@ function OpeningForm({
   transition: DraftOpening["transition"];
   setTransition: (v: DraftOpening["transition"]) => void;
   onArm: (arm: Arm) => void;
+  note: string | null;
   onCancel: () => void;
   onPlace: () => void;
 }) {
@@ -755,6 +770,7 @@ function OpeningForm({
           </button>
         ))}
       </div>
+      {note && <p className="text-sm font-semibold text-[#8a3b12]">{note}</p>}
       <div className="flex gap-2">
         <button type="button" onClick={onCancel} className="h-12 flex-1 rounded-xl bg-black/5 font-semibold">
           Cancel
