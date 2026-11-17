@@ -1,7 +1,6 @@
 import { listedArea, roomFlooring } from "@/lib/field/materials";
 import { carpetPlans } from "@/lib/field/tseam";
-import { planClosetLabel } from "@/lib/field/arrow-draw";
-import { layoutWallLabels, type LabelLimits } from "@/lib/field/wall-labels";
+import { frameInFreeArea, layoutCaptions, layoutWallLabels, zoomAbout, type LabelLimits } from "@/lib/field/wall-labels";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -317,19 +316,21 @@ export function PlanEditor({
     if (!liftRoom) return;
     const bar = obstacles.find((o) => o.kind === "room-bar");
     const room = selectedRoomId ? roomsRef.current.find((r) => r.id === selectedRoomId) : null;
-    if (!bar || !room || size.w < 40) return;
+    if (!bar || !room || size.w < 40 || size.h < 40) return;
     const b = bbox(room.points);
-    const top = 8;
-    const bottom = Math.max(top + 80, bar.t - 12);
-    const bandH = bottom - top;
-    const bandW = Math.max(80, size.w - 16);
-    const scale = Math.max(4, Math.min(120, Math.min(bandW / Math.max(b.w, 1), bandH / Math.max(b.h, 1))));
-    setView({
-      scale,
-      tx: 8 + (bandW - b.w * scale) / 2 - b.minX * scale,
-      ty: top + (bandH - b.h * scale) / 2 - b.minY * scale,
-    });
-  }, [liftRoom, obstacles, selectedRoomId, size.w]);
+    let top = 8;
+    for (const o of obstacles) {
+      if (o.kind === "zoom" || (o.t < 72 && o.b < size.h * 0.45)) top = Math.max(top, o.b + 8);
+    }
+    const labelPad = 32;
+    setView(
+      frameInFreeArea(
+        { minX: b.minX, minY: b.minY, w: b.w, h: b.h },
+        { w: size.w, h: size.h },
+        { top: top + labelPad, right: labelPad, bottom: size.h - bar.t + labelPad, left: labelPad },
+      ),
+    );
+  }, [liftRoom, obstacles, selectedRoomId, size.w, size.h]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -985,31 +986,26 @@ export function PlanEditor({
               left: 4,
               right: Math.max(48, size.w - 4),
             };
+            const captions = layoutCaptions(
+              property.rooms.map((room) => ({
+                id: room.id,
+                points: room.points,
+                name: room.closet ? "Closet" : room.name,
+                area: formatArea(listedArea(property, room), property.units),
+                closet: Boolean(room.closet),
+                holes: property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points),
+              })),
+              view,
+            );
             for (const room of property.rooms) {
-              const holes = property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points);
-              const c0 = roomLabelPoint(room.points, room.closet ? [] : holes);
-              const box = bbox(room.points);
-              const caption = room.closet
-                ? planClosetLabel(room.name, room.points, property.units)
-                : room.name;
-              const screenCap = (Math.min(box.w, box.h) * view.scale) / (room.closet ? 1.4 : 2.4);
-              const byWidth = (box.w * view.scale * 0.9) / Math.max(3, caption.length * 0.55);
-              const fontPx = Math.max(8, Math.min(16, screenCap, byWidth));
-              const nsx = view.tx + c0.x * view.scale;
-              const nsy = view.ty + c0.y * view.scale;
-              const nameW = Math.max(28, caption.length * fontPx * 0.56);
-              placedLabels.push({
-                l: nsx - nameW / 2,
-                t: nsy - fontPx * 0.8,
-                r: nsx + nameW / 2,
-                b: nsy + fontPx * (room.closet ? 0.9 : 1.7),
-              });
-              if (view.scale >= 16 && closureGap(room.points) > 0.08) {
+              const cap = captions.get(room.id);
+              if (cap) placedLabels.push(cap.box);
+              if (view.scale >= 16 && closureGap(room.points) > 0.08 && cap) {
                 placedLabels.push({
-                  l: nsx - 36,
-                  t: nsy + fontPx * 1.8,
-                  r: nsx + 36,
-                  b: nsy + fontPx * 2.8,
+                  l: cap.box.l,
+                  t: cap.box.b + 2,
+                  r: cap.box.r,
+                  b: cap.box.b + 16,
                 });
               }
               if (seamEdit || property.showSeams !== false) {
@@ -1019,6 +1015,7 @@ export function PlanEditor({
               }
             }
             const wallSpots = new Map<string, ReturnType<typeof layoutWallLabels>>();
+            const claimed: { x: number; y: number; length: number; horizontal: boolean }[] = [];
             const ordered = [
               ...property.rooms.filter((r) => r.id !== selectedRoomId),
               ...property.rooms.filter((r) => r.id === selectedRoomId),
@@ -1033,36 +1030,38 @@ export function PlanEditor({
                   labelLimit,
                   property.rooms.filter((r) => r.id !== room.id).map((r) => r.points),
                   obstacles,
+                  claimed,
+                  (edge) => formatLength(edge.length, property.units),
                 ),
               );
             }
             return property.rooms.map((room) => {
+            const cap = captions.get(room.id) ?? null;
             const holes = property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points);
-            const c = roomLabelPoint(room.points, room.closet ? [] : holes);
-            const box = bbox(room.points);
-            const caption = room.closet ? planClosetLabel(room.name, room.points, property.units) : room.name;
-            const screenCap = (Math.min(box.w, box.h) * view.scale) / (room.closet ? 1.4 : 2.4);
-            const byWidth = (box.w * view.scale * 0.9) / Math.max(3, caption.length * 0.55);
-            const fs = Math.max(8, Math.min(16, screenCap, byWidth)) / view.scale;
+            const c = cap ? { x: cap.x, y: cap.y } : roomLabelPoint(room.points, room.closet ? [] : holes);
+            const fs = cap ? cap.fontPx / view.scale : px(12);
             const thumbW = px(64);
             return (
               <g key={`l${room.id}`}>
-                <text
-                  x={c.x}
-                  y={c.y}
-                  fontSize={fs}
-                  fontWeight={700}
-                  textAnchor="middle"
-                  fill="#1c1b18"
-                  pointerEvents="none"
-                >
-                  {room.closet ? "Closet" : room.name}
-                </text>
-                {view.scale >= 16 && closureGap(room.points) > 0.08 && (
+                {cap?.lines.map((line, i) => (
+                  <text
+                    key={`${i}-${line}`}
+                    x={c.x}
+                    y={c.y + i * fs * 1.2}
+                    fontSize={fs}
+                    fontWeight={i === 0 ? 700 : 500}
+                    textAnchor="middle"
+                    fill={i === 0 ? "#1c1b18" : "#5c574d"}
+                    pointerEvents="none"
+                  >
+                    {line}
+                  </text>
+                ))}
+                {view.scale >= 16 && closureGap(room.points) > 0.08 && cap && (
                   <text
                     x={c.x}
-                    y={c.y + fs * 2.35}
-                    fontSize={fs * 0.7}
+                    y={(cap.box.b + 12 - view.ty) / view.scale}
+                    fontSize={fs * 0.65}
                     fontWeight={700}
                     textAnchor="middle"
                     fill="#8a3b12"
@@ -1071,18 +1070,6 @@ export function PlanEditor({
                     Gap {formatLength(closureGap(room.points), property.units)}
                   </text>
                 )}
-                  <text
-                    x={c.x}
-                    y={c.y + fs * 1.15}
-                    fontSize={fs * (room.closet ? 0.62 : 0.75)}
-                    textAnchor="middle"
-                    fill="#5c574d"
-                    pointerEvents="none"
-                  >
-                    {room.closet
-                      ? planClosetLabel(room.name, room.points, property.units)
-                      : formatArea(listedArea(property, room), property.units)}
-                  </text>
                 {view.scale >= 18 && room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
                     key={ph.id}
@@ -1274,11 +1261,16 @@ export function PlanEditor({
     const el = wrap.current;
     const w = el?.clientWidth || size.w;
     const h = el?.clientHeight || size.h;
-    const scale = Math.max(4, Math.min(160, view.scale * k));
-    const ratio = scale / view.scale;
-    const mx = w / 2;
-    const my = h / 2;
-    setView({ scale, tx: mx - ((mx - view.tx) * ratio), ty: my - ((my - view.ty) * ratio) });
+    const room = selectedRoomId ? property.rooms.find((r) => r.id === selectedRoomId) : null;
+    let anchor = { x: w / 2, y: h / 2 };
+    if (room) {
+      const b = bbox(room.points);
+      anchor = {
+        x: view.tx + ((b.minX + b.maxX) / 2) * view.scale,
+        y: view.ty + ((b.minY + b.maxY) / 2) * view.scale,
+      };
+    }
+    setView(zoomAbout(view, anchor, k));
   }
 }
 

@@ -11,7 +11,6 @@ import {
   closureGap,
   edges,
   ensureClockwise,
-  formatArea,
   formatLength,
   isSimple,
   newRoom,
@@ -349,20 +348,6 @@ export function closetCaption(parentName: string, closetName: string, points: Pt
   const areaText =
     units === "ft" ? `${sq.toFixed(2)} sf` : `${sq.toFixed(2)} m²`;
   return `${parentName} ${closetName} ${size} = ${areaText}`;
-}
-
-/** Plan label. `roomName` may already start with the parent name ("MBR closet"). */
-export function closetPlanLabel(parentName: string, roomName: string, points: Pt[], units: Units): string {
-  const prefix = `${parentName} `;
-  const short = roomName.startsWith(prefix) ? roomName.slice(prefix.length) : roomName;
-  return closetCaption(parentName, short, points, units);
-}
-
-/** Short plan chip. The long caption overlaps the rooms next door. */
-export function planClosetLabel(roomName: string, points: Pt[], units: Units): string {
-  const sq = formatArea(area(points), units);
-  const label = /closet/i.test(roomName) ? "Closet" : roomName.trim() || "Closet";
-  return `${label} ${sq}`;
 }
 
 export type CommitIds = (prefix: string) => string;
