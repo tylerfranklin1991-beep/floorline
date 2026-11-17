@@ -14,6 +14,7 @@ import {
   newRoom,
   nextRoomName,
   roomAtPoint,
+  roomLabelPoint,
   outlineFromWalk,
   parseLength,
   rectPoints,
@@ -25,6 +26,7 @@ import {
   closureGap,
   squareUp,
   snapWallLength,
+  pointInPolygon,
   polygonsOverlap,
 } from "./model.ts";
 
@@ -311,6 +313,14 @@ describe("taps and room names", () => {
     assert.equal(roomAtPoint(rooms, { x: 28, y: 8 }), null);
     const overlap = { id: "inside", points: rectPoints(2, 2, 2, 2) };
     assert.equal(roomAtPoint([room, overlap], { x: 3, y: 3 })?.id, "inside");
+  });
+
+  it("puts the room name outside a closet that sits in the middle", () => {
+    const room = rectPoints(0, 0, 12, 10);
+    const closet = rectPoints(4, 4, 4, 3);
+    const at = roomLabelPoint(room, [closet]);
+    assert.equal(pointInPolygon(at, closet), false);
+    assert.equal(pointInPolygon(at, room), true);
   });
 
   it("numbers the next room from the rooms, not their closets", () => {

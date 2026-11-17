@@ -327,6 +327,7 @@ function SelectionBar({
   focusWall,
   keyboard,
   onOpenChange,
+  onSquareUp,
   children,
 }: {
   property: FieldProperty;
@@ -336,6 +337,7 @@ function SelectionBar({
   focusWall: number | null;
   keyboard: number;
   onOpenChange: (open: boolean) => void;
+  onSquareUp?: (open: boolean) => void;
   children: ReactNode;
 }) {
   const updateRoom = useField((s) => s.updateRoom);
@@ -415,7 +417,7 @@ function SelectionBar({
           </button>
         )}
       </div>
-      {room && <SquareUpButton room={room} units={property.units} />}
+      {room && <SquareUpButton room={room} units={property.units} onActive={onSquareUp} />}
       {room &&
         property.rooms.some((other) => other.id !== room.id && polygonsOverlap(room.points, other.points)) && (
           <p className="px-3 pb-2 text-sm font-semibold text-[#8a3b12]">
@@ -483,6 +485,12 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const keyboard = useKeyboardInset();
   const [fitNonce, setFitNonce] = useState(0);
+  const [fitRoomId, setFitRoomId] = useState<string | null>(null);
+  const [squareUp, setSquareUp] = useState(false);
+  const requestFit = (roomId: string | null) => {
+    setFitRoomId(roomId);
+    setFitNonce((n) => n + 1);
+  };
   const [drawName, setDrawName] = useState<string | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
@@ -680,7 +688,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       r.photos.push({ id, thumb: p.thumb, takenAt: Date.now() });
     }
     addRoom(r);
-    setFitNonce((n) => n + 1);
+    requestFit(null);
     toast.success(`${r.name} added — tap a wall length to adjust`);
   };
 
@@ -721,7 +729,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       openings: [...p.openings, ...openings],
     }));
     select(rooms[rooms.length - 1].id);
-    setFitNonce((n) => n + 1);
+    requestFit(null);
     toast.success(
       `${rooms.length} room${rooms.length > 1 ? "s" : ""} added — drag walls or type lengths to tidy up`,
     );
@@ -807,6 +815,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
+          fitRoomId={fitRoomId}
+          liftRoom={squareUp}
           focusWall={focusWall}
           draft={arrowOn ? draft : null}
           draftOrigin={nextRoomOrigin(property.rooms)}
@@ -878,6 +888,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
                 openings: [...p.openings, ...committed.openings],
               }));
               select(committed.room.id);
+              requestFit(committed.room.id);
               setFocusWall(0);
               setLaserNote({
                 label: committed.room.name,
@@ -897,6 +908,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             focusWall={focusWall}
             keyboard={keyboard}
             onOpenChange={setMenuOpen}
+            onSquareUp={setSquareUp}
           >
             {stairs ? (
               <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />
@@ -1008,7 +1020,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           onClose={() => setSketchOpen(false)}
           onTraceInstead={() => {
             setTraceOpen(true);
-            setFitNonce((n) => n + 1);
+            requestFit(null);
           }}
         />
       )}
@@ -1024,7 +1036,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             const r = newRoom(name, translate(pts, o.x - b.minX, o.y - b.minY), "typed");
             r.photos.push(...photos);
             addRoom(r);
-            setFitNonce((n) => n + 1);
+            requestFit(null);
             toast.success(`${r.name} added with ${pts.length} walls`);
           }}
         />

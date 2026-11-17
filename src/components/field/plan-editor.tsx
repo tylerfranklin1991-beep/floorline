@@ -2,11 +2,11 @@ import { useBlobUrl } from "@/lib/field/use-blob-url";
 import { listedArea, roomFlooring } from "@/lib/field/materials";
 import { carpetPlans } from "@/lib/field/tseam";
 import { planClosetLabel } from "@/lib/field/arrow-draw";
+import { layoutWallLabels, type LabelLimits } from "@/lib/field/wall-labels";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   bbox,
-  centroid,
   defaultOpeningWidth,
   edges,
   formatArea,
@@ -27,9 +27,9 @@ import {
   closureGap,
   snapWallLength,
   wallSnapInches,
-  pointInPolygon,
   nextRoomName,
   roomAtPoint,
+  roomLabelPoint,
   rectPoints,
   setWallLength,
   snap,
@@ -55,7 +55,7 @@ export type EditorMode =
 type View = { scale: number; tx: number; ty: number };
 
 type Drag =
-  | { kind: "pan"; start: Pt; view: View }
+  | { kind: "pan"; start: Pt; view: View; empty: boolean }
   | { kind: "room"; roomId: string; start: Pt; points: Pt[]; moved: boolean }
   | { kind: "corner"; roomId: string; index: number; points: Pt[] }
   | { kind: "wall"; roomId: string; index: number; start: Pt; points: Pt[] }
@@ -72,10 +72,6 @@ const TAP_SLOP_PX = 10;
 
 type ScreenBox = { l: number; t: number; r: number; b: number; kind?: string };
 
-function boxesOverlap(a: ScreenBox, b: ScreenBox) {
-  return a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t;
-}
-
 /** Top-left of a carpet piece, clear of the room name at the centre. */
 function pieceMark(corners: Pt[], scale: number): Pt {
   const s = Math.max(scale, 1);
@@ -84,9 +80,6 @@ function pieceMark(corners: Pt[], scale: number): Pt {
     y: Math.min(...corners.map((q) => q.y)) + 16 / s,
   };
 }
-
-type WallEdge = { a: Pt; b: Pt; index: number; length: number; horizontal: boolean };
-type LabelLimits = { top: number; bottom: number; left: number; right: number };
 
 /** Padding so the plan and its outside length chips clear measured chrome. */
 function chromeInsets(boxes: ScreenBox[], w: number, h: number) {
@@ -110,91 +103,6 @@ function chromeInsets(boxes: ScreenBox[], w: number, h: number) {
   return { top: top + 40, bottom: bottom + 40, left: left + 64, right: right + 64 };
 }
 
-/**
- * Length chips sit outside the wall, then inside if outside would leave the
- * screen, cover chrome, or sit in a neighbouring room. The selected room
- * always keeps a chip.
- */
-function layoutWallLabels(
-  es: WallEdge[],
-  view: { scale: number; tx: number; ty: number },
-  placed: ScreenBox[],
-  limits: LabelLimits,
-  neighbors: Pt[][],
-  obstacles: ScreenBox[],
-  mustShow: boolean,
-) {
-  const scale = Math.max(view.scale, 1);
-  const halfW = 36;
-  const halfH = 15;
-  const out: { e: WallEdge; x: number; y: number }[] = [];
-  const fits = (x: number, y: number, allowLabels: boolean) => {
-    const sx = view.tx + x * view.scale;
-    const sy = view.ty + y * view.scale;
-    const box = { l: sx - halfW, t: sy - halfH, r: sx + halfW, b: sy + halfH };
-    if (box.l < limits.left || box.r > limits.right || box.t < limits.top || box.b > limits.bottom) return null;
-    if (obstacles.some((o) => boxesOverlap(box, o))) return null;
-    if (neighbors.some((poly) => pointInPolygon({ x, y }, poly))) return null;
-    if (!allowLabels && placed.some((p) => boxesOverlap(box, p))) return null;
-    return box;
-  };
-  for (const e of es) {
-    const L = e.length || 1;
-    const nx = (e.b.y - e.a.y) / L;
-    const ny = -(e.b.x - e.a.x) / L;
-    const tx = -ny;
-    const ty = nx;
-    const midX = (e.a.x + e.b.x) / 2;
-    const midY = (e.a.y + e.b.y) / 2;
-    let chosen: { x: number; y: number; box: ScreenBox } | null = null;
-    const attempt = (sign: number, distPx: number, alongPx: number, allowLabels: boolean) => {
-      const x = midX + nx * sign * (distPx / scale) + tx * (alongPx / scale);
-      const y = midY + ny * sign * (distPx / scale) + ty * (alongPx / scale);
-      const box = fits(x, y, allowLabels);
-      if (!box) return false;
-      chosen = { x, y, box };
-      return true;
-    };
-    for (const sign of [1, -1]) {
-      if (chosen) break;
-      for (let step = 0; step < 5 && !chosen; step++) {
-        for (const along of [0, 44, -44, 88, -88]) {
-          if (attempt(sign, 22 + step * 16, along, false)) break;
-        }
-      }
-    }
-    if (!chosen && mustShow) {
-      for (const along of [0, 22, -22, 44, -44]) {
-        if (attempt(-1, 18, along, false)) break;
-      }
-    }
-    if (!chosen && mustShow) {
-      // Nudge along this wall. Clamping every wall onto the same screen edge
-      // stacks the chips on top of each other and on the room name.
-      const spreads = [0, 52, -52, 104, -104, 156, -156];
-      for (const along of spreads) {
-        let sx = view.tx + (midX - nx * (18 / scale) + tx * (along / scale)) * view.scale;
-        let sy = view.ty + (midY - ny * (18 / scale) + ty * (along / scale)) * view.scale;
-        const loX = limits.left + halfW;
-        const hiX = Math.max(loX, limits.right - halfW);
-        const loY = limits.top + halfH;
-        const hiY = Math.max(loY, limits.bottom - halfH);
-        sx = Math.min(Math.max(sx, loX), hiX);
-        sy = Math.min(Math.max(sy, loY), hiY);
-        const box = { l: sx - halfW, t: sy - halfH, r: sx + halfW, b: sy + halfH };
-        if (placed.some((p) => boxesOverlap(box, p))) continue;
-        if (obstacles.some((o) => boxesOverlap(box, o))) continue;
-        chosen = { x: (sx - view.tx) / view.scale, y: (sy - view.ty) / view.scale, box };
-        break;
-      }
-    }
-    if (!chosen) continue;
-    placed.push(chosen.box);
-    out.push({ e, x: chosen.x, y: chosen.y });
-  }
-  return out;
-}
-
 function labelRotation(e: { a: Pt; b: Pt; horizontal: boolean }): number {
   const axis = Math.abs(e.a.x - e.b.x) < 1e-3 || Math.abs(e.a.y - e.b.y) < 1e-3;
   if (axis) return e.horizontal ? 0 : -90;
@@ -216,6 +124,8 @@ export function PlanEditor({
   onOpenMenu,
   onSuppressMenu,
   fitNonce,
+  fitRoomId,
+  liftRoom,
   drawName,
   focusWall,
   draft,
@@ -239,6 +149,10 @@ export function PlanEditor({
   /** A drag passed the tap slop — keep the room menu closed. */
   onSuppressMenu?: () => void;
   fitNonce: number;
+  /** When set, Fit frames this room and its closets instead of the whole plan. */
+  fitRoomId?: string | null;
+  /** Square up is open: keep the selected room above the bottom bar. */
+  liftRoom?: boolean;
   drawName?: string | null;
   /** Wall the laser will fill. */
   focusWall?: number | null;
@@ -377,8 +291,14 @@ export function PlanEditor({
     };
   }, []);
 
-  const fit = useCallback(() => {
-    const pts = [
+  const fit = useCallback((roomId?: string | null) => {
+    const focus = roomId ? roomsRef.current.find((r) => r.id === roomId) : null;
+    const pts = focus
+      ? [
+          ...focus.points,
+          ...roomsRef.current.filter((r) => r.closet?.parentId === focus.id).flatMap((r) => r.points),
+        ]
+      : [
       ...roomsRef.current.flatMap((r) => r.points),
       ...stairsRef.current.flatMap((st) => {
         const r = stairsRect(st);
@@ -430,11 +350,29 @@ export function PlanEditor({
   // zoom the plan just because the canvas element changed size.
   useEffect(() => {
     if (!measured.current || size.w < 40 || size.h < 40) return;
-    const key = `${property.id}|${fitNonce}|${property.rooms.length === 0}|${unitPx}`;
+    const key = `${property.id}|${fitNonce}|${fitRoomId ?? ""}|${property.rooms.length === 0}|${unitPx}`;
     if (fitKey.current === key) return;
     fitKey.current = key;
-    fit();
-  }, [size.w, size.h, fit, fitNonce, property.id, property.rooms.length, unitPx]);
+    fit(fitRoomId);
+  }, [size.w, size.h, fit, fitNonce, fitRoomId, property.id, property.rooms.length, unitPx]);
+
+  useEffect(() => {
+    if (!liftRoom) return;
+    const bar = obstacles.find((o) => o.kind === "room-bar");
+    const room = selectedRoomId ? roomsRef.current.find((r) => r.id === selectedRoomId) : null;
+    if (!bar || !room || size.w < 40) return;
+    const b = bbox(room.points);
+    const top = 8;
+    const bottom = Math.max(top + 80, bar.t - 12);
+    const bandH = bottom - top;
+    const bandW = Math.max(80, size.w - 16);
+    const scale = Math.max(4, Math.min(120, Math.min(bandW / Math.max(b.w, 1), bandH / Math.max(b.h, 1))));
+    setView({
+      scale,
+      tx: 8 + (bandW - b.w * scale) / 2 - b.minX * scale,
+      ty: top + (bandH - b.h * scale) / 2 - b.minY * scale,
+    });
+  }, [liftRoom, obstacles, selectedRoomId, size.w]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -626,10 +564,7 @@ export function PlanEditor({
       setDrag({ kind: "room", roomId: hit.id, start: p, points: hit.points, moved: false });
       return;
     }
-    select(null);
-    onRoomTap?.(null);
-    selectStairs(null);
-    setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view });
+    setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view, empty: true });
   };
 
   const setRoomPoints = (roomId: string, points: Pt[]) =>
@@ -647,7 +582,7 @@ export function PlanEditor({
         if (labelWait.current) window.clearTimeout(labelWait.current);
         labelWait.current = null;
         labelPending.current = null;
-        setDrag({ kind: "pan", start: { x: press.current.x, y: press.current.y }, view });
+        setDrag({ kind: "pan", start: { x: press.current.x, y: press.current.y }, view, empty: false });
       }
       return;
     }
@@ -779,6 +714,16 @@ export function PlanEditor({
     if (!drag) return;
     if (drag.kind === "pinch") {
       if (pointers.current.size === 0) setDrag(null);
+      return;
+    }
+    if (drag.kind === "pan") {
+      const moved = Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) > TAP_SLOP_PX;
+      if (drag.empty && !moved) {
+        select(null);
+        onRoomTap?.(null);
+        selectStairs(null);
+      }
+      setDrag(null);
       return;
     }
     if (drag.kind === "draw") {
@@ -1138,21 +1083,32 @@ export function PlanEditor({
               right: Math.max(48, size.w - 4),
             };
             for (const room of property.rooms) {
-              const c0 = centroid(room.points);
-              const fs0 = Math.max(px(13), Math.min(1.1 / unitPx, px(22)));
-              const fontPx = fs0 * view.scale;
-              const nsx = view.tx + c0.x * view.scale;
-              const nsy = view.ty + c0.y * view.scale;
+              const holes = property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points);
+              const c0 = roomLabelPoint(room.points, room.closet ? [] : holes);
+              const box = bbox(room.points);
               const caption = room.closet
                 ? planClosetLabel(room.name, room.points, property.units)
                 : room.name;
-              const nameW = Math.max(36, caption.length * fontPx * 0.56);
+              const screenCap = (Math.min(box.w, box.h) * view.scale) / (room.closet ? 1.4 : 2.4);
+              const byWidth = (box.w * view.scale * 0.9) / Math.max(3, caption.length * 0.55);
+              const fontPx = Math.max(8, Math.min(16, screenCap, byWidth));
+              const nsx = view.tx + c0.x * view.scale;
+              const nsy = view.ty + c0.y * view.scale;
+              const nameW = Math.max(28, caption.length * fontPx * 0.56);
               placedLabels.push({
                 l: nsx - nameW / 2,
-                t: nsy - fontPx * 0.75,
+                t: nsy - fontPx * 0.8,
                 r: nsx + nameW / 2,
-                b: nsy + fontPx * 1.6,
+                b: nsy + fontPx * (room.closet ? 0.9 : 1.7),
               });
+              if (view.scale >= 16 && closureGap(room.points) > 0.08) {
+                placedLabels.push({
+                  l: nsx - 36,
+                  t: nsy + fontPx * 1.8,
+                  r: nsx + 36,
+                  b: nsy + fontPx * 2.8,
+                });
+              }
               if (seamEdit || property.showSeams !== false) {
                 const mx = view.tx + (Math.min(...room.points.map((q) => q.x)) + 14 / Math.max(view.scale, 1)) * view.scale;
                 const my = view.ty + (Math.min(...room.points.map((q) => q.y)) + 16 / Math.max(view.scale, 1)) * view.scale;
@@ -1174,13 +1130,17 @@ export function PlanEditor({
                   labelLimit,
                   property.rooms.filter((r) => r.id !== room.id).map((r) => r.points),
                   obstacles,
-                  room.id === selectedRoomId,
                 ),
               );
             }
             return property.rooms.map((room) => {
-            const c = centroid(room.points);
-            const fs = Math.max(px(13), Math.min(1.1 / unitPx, px(22)));
+            const holes = property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points);
+            const c = roomLabelPoint(room.points, room.closet ? [] : holes);
+            const box = bbox(room.points);
+            const caption = room.closet ? planClosetLabel(room.name, room.points, property.units) : room.name;
+            const screenCap = (Math.min(box.w, box.h) * view.scale) / (room.closet ? 1.4 : 2.4);
+            const byWidth = (box.w * view.scale * 0.9) / Math.max(3, caption.length * 0.55);
+            const fs = Math.max(8, Math.min(16, screenCap, byWidth)) / view.scale;
             const thumbW = px(64);
             return (
               <g key={`l${room.id}`}>
@@ -1193,12 +1153,12 @@ export function PlanEditor({
                   fill="#1c1b18"
                   pointerEvents="none"
                 >
-                  {room.name}
+                  {room.closet ? "Closet" : room.name}
                 </text>
                 {view.scale >= 16 && closureGap(room.points) > 0.08 && (
                   <text
                     x={c.x}
-                    y={c.y - fs * 1.6}
+                    y={c.y + fs * 2.35}
                     fontSize={fs * 0.65}
                     fontWeight={700}
                     textAnchor="middle"
@@ -1235,14 +1195,19 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {(room.id === selectedRoomId || view.scale >= 14) && (wallSpots.get(room.id) ?? []).map(({ e, x: tx, y: ty }) => {
+                {(room.id === selectedRoomId || view.scale >= 14) && (wallSpots.get(room.id) ?? []).map(({ e, x: tx, y: ty, scale: chip, leader }) => {
                   const label = formatLength(e.length, property.units);
-                  const bw = px(label.length * 7.5 + 14);
-                  const bh = px(22);
-                  const hit = px(44);
+                  const bw = px((label.length * 7.5 + 14) * chip);
+                  const bh = px(22 * chip);
+                  const hit = px(44 * chip);
+                  const midX = (e.a.x + e.b.x) / 2;
+                  const midY = (e.a.y + e.b.y) / 2;
                   return (
+                    <g key={e.index}>
+                      {leader && (
+                        <line x1={midX} y1={midY} x2={tx} y2={ty} stroke="#c9b9a0" strokeWidth={px(1)} pointerEvents="none" />
+                      )}
                     <g
-                      key={e.index}
                       data-h="label"
                       data-room={room.id}
                       data-i={e.index}
@@ -1261,14 +1226,15 @@ export function PlanEditor({
                         strokeWidth={px(1)}
                       />
                       <text
-                        y={px(4.5)}
-                        fontSize={px(13)}
+                        y={px(4.5 * chip)}
+                        fontSize={px(13 * chip)}
                         textAnchor="middle"
                         fill="#8a3b12"
                         fontWeight={600}
                       >
                         {label}
                       </text>
+                    </g>
                     </g>
                   );
                 })}
@@ -1428,7 +1394,7 @@ export function PlanEditor({
       >
         <ZoomBtn label="+" onClick={() => zoomBy(1.4)} />
         <ZoomBtn label="−" onClick={() => zoomBy(1 / 1.4)} />
-        <ZoomBtn label="Fit" onClick={fit} />
+        <ZoomBtn label="Fit" onClick={() => fit(null)} />
       </div>
     </div>
   );

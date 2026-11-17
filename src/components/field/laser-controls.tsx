@@ -603,7 +603,19 @@ export function ArrowSheet({
                 Close room
               </button>
             </div>
-            <button type="button" onClick={() => setAsk("discard")} className="h-10 w-full rounded-xl text-sm font-semibold text-[#8a3b12]">
+            <button
+              type="button"
+              onClick={() => {
+                const bare =
+                  draft.points.length <= 1 &&
+                  !draft.closetChain &&
+                  draft.closets.length === 0 &&
+                  draft.openings.length === 0;
+                if (bare) discardDraft();
+                else setAsk("discard");
+              }}
+              className="h-10 w-full rounded-xl text-sm font-semibold text-[#8a3b12]"
+            >
               Discard draft
             </button>
           </>
