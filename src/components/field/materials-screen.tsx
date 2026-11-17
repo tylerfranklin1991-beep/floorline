@@ -16,6 +16,7 @@ import { downloadBlob, slug } from "@/lib/field/export";
 import { jobSettings } from "@/lib/field/job";
 import { materialsCsv, materialsText, orderLines } from "@/lib/field/takeoff";
 import { JobSettingsSheet } from "./job-settings";
+import { HelpMark } from "./tutorials-ui";
 
 async function copyText(t: string): Promise<boolean> {
   try {
@@ -101,6 +102,7 @@ export function MaterialsScreen({
           <ArrowLeft />
         </button>
         <h1 className="flex-1 text-xl font-bold">Materials</h1>
+        <HelpMark id="materials" label="How the estimate works" />
         <button
           type="button"
           disabled={busy}

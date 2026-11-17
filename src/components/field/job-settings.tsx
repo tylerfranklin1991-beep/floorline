@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { jobSettings, type JobSettings } from "@/lib/field/job";
+import { setDistoMock, useDisto } from "@/lib/field/disto-link";
 import { ROLL_WIDTHS_FT } from "@/lib/field/materials";
 import type { FieldProperty } from "@/lib/field/model";
 import { useField } from "@/lib/field/store";
@@ -140,6 +141,7 @@ export function JobSettingsSheet({
             onCommit={(v) => set({ installDate: v })}
           />
           <Text label="Job notes" value={j.jobNotes} onCommit={(v) => set({ jobNotes: v })} />
+          <DistoDebug />
         </section>
 
         <section className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
@@ -242,5 +244,24 @@ export function JobSettingsSheet({
         </section>
       </div>
     </div>
+  );
+}
+
+function DistoDebug() {
+  const disto = useDisto();
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-xl bg-black/[0.03] px-3 py-2 text-base">
+      <span>
+        Simulate DISTO
+        <span className="block text-sm font-normal text-black/50">Debug laser, no Bluetooth hardware</span>
+      </span>
+      <input
+        type="checkbox"
+        className="size-6"
+        checked={disto.mock}
+        aria-label="Simulate DISTO"
+        onChange={(e) => setDistoMock(e.target.checked)}
+      />
+    </label>
   );
 }

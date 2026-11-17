@@ -9,6 +9,12 @@ const config: CapacitorConfig = {
     // Debug-friendly beta: lets you inspect the WebView via chrome://inspect.
     webContentsDebuggingEnabled: true,
   },
+  plugins: {
+    Keyboard: {
+      resize: "native",
+      resizeOnFullScreen: true,
+    },
+  },
 };
 
 export default config;
