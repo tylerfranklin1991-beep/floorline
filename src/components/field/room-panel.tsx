@@ -82,9 +82,21 @@ export function LengthInput({
   );
 }
 
-export function SquareUpButton({ room, units }: { room: FieldRoom; units: FieldProperty["units"] }) {
+export function SquareUpButton({
+  room,
+  units,
+  onActive,
+}: {
+  room: FieldRoom;
+  units: FieldProperty["units"];
+  onActive?: (open: boolean) => void;
+}) {
   const updateRoom = useField((s) => s.updateRoom);
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    onActive?.(open);
+    return () => onActive?.(false);
+  }, [open, onActive]);
   const options = squareUpOptions(room.points, units);
   const [wall, setWall] = useState(() => options[0]?.wall ?? 0);
   useEffect(() => setWall(squareUpOptions(room.points, units)[0]?.wall ?? 0), [room.id, room.points, units]);

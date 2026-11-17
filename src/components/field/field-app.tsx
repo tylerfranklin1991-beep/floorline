@@ -308,6 +308,7 @@ function SelectionBar({
   focusWall,
   keyboard,
   onOpenChange,
+  onSquareUp,
   children,
 }: {
   property: FieldProperty;
@@ -317,6 +318,7 @@ function SelectionBar({
   focusWall: number | null;
   keyboard: number;
   onOpenChange: (open: boolean) => void;
+  onSquareUp?: (open: boolean) => void;
   children: ReactNode;
 }) {
   const updateRoom = useField((s) => s.updateRoom);
@@ -396,7 +398,7 @@ function SelectionBar({
           </button>
         )}
       </div>
-      {room && <SquareUpButton room={room} units={property.units} />}
+      {room && <SquareUpButton room={room} units={property.units} onActive={onSquareUp} />}
       {room &&
         property.rooms.some((other) => other.id !== room.id && polygonsOverlap(room.points, other.points)) && (
           <p className="px-3 pb-2 text-sm font-semibold text-[#8a3b12]">
@@ -460,6 +462,12 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
   const [showQuote, setShowQuote] = useState(false);
   const [showSeams, setShowSeams] = useState(false);
   const [fitNonce, setFitNonce] = useState(0);
+  const [fitRoomId, setFitRoomId] = useState<string | null>(null);
+  const [squareUp, setSquareUp] = useState(false);
+  const requestFit = (roomId: string | null) => {
+    setFitRoomId(roomId);
+    setFitNonce((n) => n + 1);
+  };
   const [menuOpen, setMenuOpen] = useState(false);
   const keyboard = useKeyboardInset();
   const [drawName, setDrawName] = useState<string | null>(null);
@@ -611,7 +619,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       r.photos.push({ id, thumb: p.thumb, takenAt: Date.now() });
     }
     addRoom(r);
-    setFitNonce((n) => n + 1);
+    requestFit(null);
     toast.success(`${r.name} added — now check the wall lengths`);
   };
 
@@ -656,7 +664,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
       openings: [...p.openings, ...openings],
     }));
     select(rooms[rooms.length - 1].id);
-    setFitNonce((n) => n + 1);
+    requestFit(null);
     toast.success(
       `${rooms.length} room${rooms.length > 1 ? "s" : ""} added — drag walls or type lengths to tidy up`,
     );
@@ -751,6 +759,8 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
           drawName={drawName}
           onModeDone={() => setMode("select")}
           fitNonce={fitNonce}
+          fitRoomId={fitRoomId}
+          liftRoom={squareUp}
           focusWall={focusWall}
           draft={arrowOn ? draft : null}
           draftOrigin={nextRoomOrigin(property.rooms)}
@@ -806,6 +816,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
                 openings: [...p.openings, ...committed.openings],
               }));
               select(committed.room.id);
+              requestFit(committed.room.id);
               setFocusWall(0);
               setLaserNote({
                 label: committed.room.name,
@@ -825,6 +836,7 @@ function PropertyScreen({ property: full }: { property: FieldProperty }) {
             focusWall={focusWall}
             keyboard={keyboard}
             onOpenChange={setMenuOpen}
+            onSquareUp={setSquareUp}
           >
             {stairs ? (
               <StairsPanel property={property} stairs={stairs} onClose={() => selectStairs(null)} />

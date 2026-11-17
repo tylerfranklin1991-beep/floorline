@@ -429,6 +429,38 @@ export function pointInPolygon(p: Pt, points: Pt[]): boolean {
   return inside;
 }
 
+/**
+ * Where to draw a room's name. Stays inside the room, and out of any closet
+ * that sits inside it, so the two captions do not land on each other.
+ */
+export function roomLabelPoint(points: Pt[], avoid: Pt[][] = []): Pt {
+  const clear = (p: Pt) => pointInPolygon(p, points) && !avoid.some((hole) => pointInPolygon(p, hole));
+  const c = centroid(points);
+  if (clear(c)) return c;
+  const box = bbox(points);
+  let best: Pt | null = null;
+  let bestClear = -1;
+  for (let iy = 1; iy <= 6; iy += 1) {
+    for (let ix = 1; ix <= 6; ix += 1) {
+      const p = { x: box.minX + (box.w * ix) / 7, y: box.minY + (box.h * iy) / 7 };
+      if (!clear(p)) continue;
+      const gap = avoid.length
+        ? Math.min(
+            ...avoid.map((hole) => {
+              const h = centroid(hole);
+              return Math.hypot(p.x - h.x, p.y - h.y);
+            }),
+          )
+        : 0;
+      if (gap > bestClear) {
+        best = p;
+        bestClear = gap;
+      }
+    }
+  }
+  return best ?? c;
+}
+
 /** The room under a tap: the smallest polygon that contains the point, not a bounding box. */
 export function roomAtPoint<T extends { points: Pt[] }>(rooms: T[], p: Pt): T | null {
   let best: T | null = null;
