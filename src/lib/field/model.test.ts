@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { areaSummary, listedArea } from "./materials.ts";
 import {
   area,
   bbox,
@@ -10,12 +11,23 @@ import {
   magnetOffset,
   moveCorner,
   newProperty,
+  newRoom,
+  nextRoomName,
+  roomAtPoint,
+  roomLabelPoint,
   outlineFromWalk,
   parseLength,
   rectPoints,
   rectilinearize,
+  removeLevel,
+  removeRoom,
   sanitizeProperty,
   setWallLength,
+  closureGap,
+  squareUp,
+  snapWallLength,
+  pointInPolygon,
+  polygonsOverlap,
 } from "./model.ts";
 
 describe("rectilinearize", () => {
@@ -72,16 +84,50 @@ describe("rectilinearize", () => {
 });
 
 describe("editing walls", () => {
-  it("setWallLength resizes a rectangle and keeps it rectilinear", () => {
+  it("setWallLength changes only that wall and leaves the opposite wall", () => {
     const pts = rectPoints(0, 0, 10, 8);
     const out = setWallLength(pts, 0, 12.5);
     assert.ok(out);
-    assert.ok(isRectilinear(out!));
     const lens = edges(out!).map((e) => e.length);
-    assert.deepEqual(lens, [12.5, 8, 12.5, 8]);
+    assert.equal(lens[0], 12.5);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[3], 8);
+    assert.ok(lens[1] > 8);
+    assert.equal(area(out!), 90);
+    assert.ok(closureGap(out!) > 2);
+    assert.equal(closureGap(pts), 0);
   });
 
-  it("setWallLength refuses to collapse a wall", () => {
+  it("squareUp on a 12x12 with a 13' top lengthens the parallel wall only", () => {
+    const pts = rectPoints(0, 0, 12, 12);
+    const open = setWallLength(pts, 0, 13)!;
+    assert.ok(Math.abs(closureGap(open) - 1) < 0.15);
+    const best = squareUp(open, undefined, "ft");
+    assert.ok(best);
+    assert.equal(best!.wall, 2);
+    assert.ok(best!.gapAfter < 0.08);
+    const bottom = best!.changes.find((c) => c.wall === 2)!;
+    assert.ok(Math.abs(bottom.from - 12) < 0.05);
+    assert.ok(Math.abs(bottom.to - 13) < 0.05);
+    const lens = edges(best!.points).map((e) => e.length);
+    assert.ok(Math.abs(lens[1] - 12) < 0.01, `side became ${lens[1]}`);
+    assert.ok(Math.abs(lens[3] - 12) < 0.01, `side became ${lens[3]}`);
+    assert.ok(Math.abs(area(best!.points) - 156) < 0.05);
+    assert.equal(
+      best!.changes.some((c) => c.wall === 1 || c.wall === 3),
+      false,
+    );
+    assert.equal(best!.changes.some((c) => c.to < 0.5), false);
+    assert.equal(squareUp(open, 1, "ft"), null);
+    assert.equal(squareUp(open, 3, "ft"), null);
+  });
+
+  it("snapWallLength lands on half inches", () => {
+    assert.equal(snapWallLength(10.04, "ft", 0.5), 10 + 0.5 / 12);
+    assert.equal(snapWallLength(10.02, "ft", 1), 10);
+  });
+
+  it("setWallLength on an L-shape does not move the far walls", () => {
     const L = [
       { x: 0, y: 0 },
       { x: 10, y: 0 },
@@ -90,7 +136,13 @@ describe("editing walls", () => {
       { x: 5, y: 10 },
       { x: 0, y: 10 },
     ];
-    assert.equal(setWallLength(L, 2, 10), null);
+    const out = setWallLength(L, 2, 10);
+    assert.ok(out);
+    const lens = edges(out!).map((e) => e.length);
+    assert.equal(lens[2], 10);
+    assert.equal(lens[4], 5);
+    assert.equal(lens[5], 10);
+    assert.equal(setWallLength(L, 2, 0), null);
   });
 
   it("moveCorner drags adjacent walls", () => {
@@ -178,5 +230,128 @@ describe("lengths", () => {
     });
     assert.equal(ok?.rooms.length, 0);
     assert.equal(ok?.openings.length, 0);
+  });
+});
+
+describe("deleting a room", () => {
+  it("keeps an included closet's area after its parent room is deleted", () => {
+    const p = newProperty("Job");
+    const parent = newRoom("MBR", rectPoints(0, 0, 12, 10), "typed");
+    const closet = newRoom("MBR closet", rectPoints(12, 0, 4, 6), "typed");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    closet.flooring = { material: "none" };
+    p.rooms = [parent, closet];
+    p.openings = [
+      { id: "door", roomId: parent.id, kind: "door", wall: 0, offset: 2, width: 3 },
+      { id: "closet-door", roomId: closet.id, kind: "door", wall: 0, offset: 1, width: 2 },
+    ];
+    assert.equal(areaSummary(p).total, 144);
+    const next = removeRoom(p, parent.id);
+    assert.equal(next.rooms.length, 1);
+    assert.equal(next.rooms[0].id, closet.id);
+    assert.equal(next.rooms[0].closet, undefined);
+    assert.equal(areaSummary(next).total, 24);
+    assert.deepEqual(
+      next.openings.map((o) => o.id),
+      ["closet-door"],
+    );
+  });
+
+  it("drops a closet link when the parent room's level is removed", () => {
+    const p = newProperty("Job");
+    p.levels.push({ id: "up", name: "2nd floor" });
+    const parent = newRoom("MBR", rectPoints(0, 0, 12, 10), "typed", "level-main");
+    const closet = newRoom("MBR closet", rectPoints(0, 0, 4, 6), "typed", "up");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    p.rooms = [parent, closet];
+    const next = removeLevel(p, "level-main");
+    assert.equal(next.rooms.length, 1);
+    assert.equal(next.rooms[0].closet, undefined);
+    assert.equal(areaSummary(next).total, 24);
+  });
+
+  it("still drops a closet link that points at a missing room when a save is loaded", () => {
+    const ok = sanitizeProperty({
+      id: "p",
+      rooms: [
+        {
+          id: "c",
+          name: "Closet",
+          points: [
+            { x: 0, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 6 },
+            { x: 0, y: 6 },
+          ],
+          closet: { parentId: "gone", includeInParent: true },
+        },
+      ],
+    });
+    assert.equal(ok?.rooms[0].closet, undefined);
+    assert.equal(ok && areaSummary(ok).total, 24);
+  });
+});
+
+describe("taps and room names", () => {
+  it("picks the smallest polygon that contains the point", () => {
+    const room = { id: "room", points: rectPoints(0, 0, 10, 8) };
+    const closet = { id: "closet", points: rectPoints(10, 2, 4, 2) };
+    const notch = {
+      id: "l",
+      points: [
+        { x: 20, y: 0 },
+        { x: 30, y: 0 },
+        { x: 30, y: 5 },
+        { x: 25, y: 5 },
+        { x: 25, y: 10 },
+        { x: 20, y: 10 },
+      ],
+    };
+    const rooms = [closet, room, notch];
+    assert.equal(roomAtPoint(rooms, { x: 3, y: 3 })?.id, "room");
+    assert.equal(roomAtPoint(rooms, { x: 11, y: 3 })?.id, "closet");
+    assert.equal(roomAtPoint(rooms, { x: 28, y: 8 }), null);
+    const overlap = { id: "inside", points: rectPoints(2, 2, 2, 2) };
+    assert.equal(roomAtPoint([room, overlap], { x: 3, y: 3 })?.id, "inside");
+  });
+
+  it("puts the room name outside a closet that sits in the middle", () => {
+    const room = rectPoints(0, 0, 12, 10);
+    const closet = rectPoints(4, 4, 4, 3);
+    const at = roomLabelPoint(room, [closet]);
+    assert.equal(pointInPolygon(at, closet), false);
+    assert.equal(pointInPolygon(at, room), true);
+  });
+
+  it("numbers the next room from the rooms, not their closets", () => {
+    const rooms = [
+      { name: "Room 6" },
+      { name: "Room 6 closet", closet: { parentId: "r", includeInParent: true } },
+    ];
+    assert.equal(nextRoomName(rooms), "Room 7");
+    const numbered = [1, 2, 3, 4, 5, 6].map((n) => ({ name: `Room ${n}` }));
+    assert.equal(nextRoomName([...numbered, rooms[1]]), "Room 7");
+    assert.equal(nextRoomName([]), "Room 1");
+  });
+
+  it("shows one area for a room and the closet it includes", () => {
+    const p = newProperty("Job");
+    const parent = newRoom("Room 6", rectPoints(0, 0, 10, 8), "typed");
+    const closet = newRoom("Room 6 closet", rectPoints(10, 0, 4, 2), "typed");
+    closet.closet = { parentId: parent.id, includeInParent: true };
+    p.rooms = [parent, closet];
+    assert.equal(listedArea(p, parent), 88);
+    assert.equal(listedArea(p, closet), 8);
+    assert.equal(areaSummary(p).total, 88);
+  });
+});
+
+describe("room overlap", () => {
+  it("warns when one room sits inside another, and not when they only share a wall", () => {
+    const outer = rectPoints(0, 0, 20, 20);
+    const inner = rectPoints(4, 4, 6, 6);
+    const beside = rectPoints(20, 0, 10, 10);
+    assert.equal(polygonsOverlap(outer, inner), true);
+    assert.equal(polygonsOverlap(outer, beside), false);
   });
 });

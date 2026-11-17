@@ -5,6 +5,7 @@ import {
   convertProperty,
   newProperty,
   removeLevel,
+  removeRoom,
   uid,
   type FieldStairs,
   sanitizeProperty,
@@ -259,11 +260,16 @@ export const useField = create<FieldState>()(
             : (p0?.levels[0]?.id ?? room.levelId);
           room = { ...room, levelId };
           // New rooms get the job's default material (LVP unless changed).
-          if (!room.flooring?.material && p0)
-            room = {
-              ...room,
-              flooring: { ...(room.flooring ?? {}), material: jobSettings(p0.job).defaultMaterial },
-            };
+            if (!room.flooring?.material && p0) {
+              const namedBed = /bed/i.test(room.name);
+              room = {
+                ...room,
+                flooring: {
+                  ...(room.flooring ?? {}),
+                  material: namedBed ? "carpet" : jobSettings(p0.job).defaultMaterial,
+                },
+              };
+            }
           get().change((p) => ({ ...p, rooms: [...p.rooms, room] }));
           set({ selectedRoomId: room.id, selectedOpeningId: null });
         },
@@ -273,11 +279,7 @@ export const useField = create<FieldState>()(
             rooms: p.rooms.map((r) => (r.id === id ? { ...r, ...patch } : r)),
           })),
         deleteRoom: (id) => {
-          get().change((p) => ({
-            ...p,
-            rooms: p.rooms.filter((r) => r.id !== id),
-            openings: p.openings.filter((o) => o.roomId !== id),
-          }));
+          get().change((p) => removeRoom(p, id));
           set({ selectedRoomId: null, selectedOpeningId: null });
         },
         duplicateRoom: (id) => {
@@ -296,6 +298,7 @@ export const useField = create<FieldState>()(
             points: translate(r.points, right + gap - b.minX, 0),
             areas: r.areas?.map((a) => ({ ...a, id: uid("area") })),
           };
+          delete copy.closet;
           get().change((p) => ({ ...p, rooms: [...p.rooms, copy] }));
           set({ selectedRoomId: copy.id, selectedOpeningId: null });
           return copy.id;

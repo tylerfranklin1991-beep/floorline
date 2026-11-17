@@ -1,15 +1,17 @@
 import { useBlobUrl } from "@/lib/field/use-blob-url";
-import { carpetLayout, roomFlooring } from "@/lib/field/materials";
+import { listedArea, roomFlooring } from "@/lib/field/materials";
+import { carpetPlans } from "@/lib/field/tseam";
+import { frameInFreeArea, layoutCaptions, layoutWallLabels, zoomAbout, type LabelLimits } from "@/lib/field/wall-labels";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
-  area,
   bbox,
-  centroid,
   defaultOpeningWidth,
   edges,
   formatArea,
   formatLength,
   gridStep,
+  isRectilinear,
   magnetOffset,
   moveCorner,
   moveWall,
@@ -21,8 +23,14 @@ import {
   stairsLabel,
   stairsRect,
   stairsTreads,
-  pointInPolygon,
+  closureGap,
+  snapWallLength,
+  wallSnapInches,
+  nextRoomName,
+  roomAtPoint,
+  roomLabelPoint,
   rectPoints,
+  setWallLength,
   snap,
   translate,
   uid,
@@ -46,16 +54,62 @@ export type EditorMode =
 type View = { scale: number; tx: number; ty: number };
 
 type Drag =
-  | { kind: "pan"; start: Pt; view: View }
+  | { kind: "pan"; start: Pt; view: View; empty: boolean }
   | { kind: "room"; roomId: string; start: Pt; points: Pt[]; moved: boolean }
   | { kind: "corner"; roomId: string; index: number; points: Pt[] }
   | { kind: "wall"; roomId: string; index: number; start: Pt; points: Pt[] }
   | { kind: "draw"; start: Pt; end: Pt }
   | { kind: "stairs"; id: string; start: Pt; x: number; y: number }
   | { kind: "pinch"; d0: number; mid0: Pt; view: View }
-  | { kind: "trace"; start: Pt; x: number; y: number };
+  | { kind: "trace"; start: Pt; x: number; y: number }
+  | { kind: "seam"; roomIds: string[]; start: Pt; offsetFt: number; pile: 0 | 90 }
+  | { kind: "label"; roomId: string; index: number; points: Pt[]; moved: boolean; base: number; ax: number; ay: number };
 
 const HANDLE_PX = 22;
+/** A press that moves farther than this is a drag, not a tap that opens the room menu. */
+const TAP_SLOP_PX = 10;
+
+type ScreenBox = { l: number; t: number; r: number; b: number; kind?: string };
+
+/** Top-left of a carpet piece, clear of the room name at the centre. */
+function pieceMark(corners: Pt[], scale: number): Pt {
+  const s = Math.max(scale, 1);
+  return {
+    x: Math.min(...corners.map((q) => q.x)) + 14 / s,
+    y: Math.min(...corners.map((q) => q.y)) + 16 / s,
+  };
+}
+
+/** Padding so the plan and its outside length chips clear measured chrome. */
+function chromeInsets(boxes: ScreenBox[], w: number, h: number) {
+  let top = 8;
+  let bottom = 8;
+  let left = 8;
+  let right = 8;
+  for (const o of boxes) {
+    if (o.b - o.t < 8 || o.r - o.l < 8) continue;
+    // A bar along the top (zoom, laser) only eats vertical space. Treating it
+    // as a side margin shrinks the plan to a strip.
+    const topBar = o.b < h * 0.55 && o.t < h * 0.4;
+    if (topBar) top = Math.max(top, Math.min(o.b + 8, h * 0.42));
+    if (o.b > h * 0.55) bottom = Math.max(bottom, Math.min(h - o.t + 8, h * 0.5));
+    if (!topBar && o.b > h * 0.3 && o.t < h * 0.7) {
+      if (o.r < w * 0.55 && o.l < 24) left = Math.max(left, o.r + 6);
+      if (o.l > w * 0.45 && o.r > w - 24) right = Math.max(right, w - o.l + 6);
+    }
+  }
+  // 22px outside the wall plus a 36px half-width chip, with a few pixels of air.
+  return { top: top + 40, bottom: bottom + 40, left: left + 64, right: right + 64 };
+}
+
+function labelRotation(e: { a: Pt; b: Pt; horizontal: boolean }): number {
+  const axis = Math.abs(e.a.x - e.b.x) < 1e-3 || Math.abs(e.a.y - e.b.y) < 1e-3;
+  if (axis) return e.horizontal ? 0 : -90;
+  let deg = (Math.atan2(e.b.y - e.a.y, e.b.x - e.a.x) * 180) / Math.PI;
+  if (deg > 90) deg -= 180;
+  if (deg < -90) deg += 180;
+  return deg;
+}
 
 export function PlanEditor({
   property,
@@ -65,8 +119,18 @@ export function PlanEditor({
   onPhotoTap,
   onOpeningTap,
   onCalibrate,
+  onRoomTap,
+  onOpenMenu,
+  onSuppressMenu,
   fitNonce,
+  fitRoomId,
+  liftRoom,
   drawName,
+  focusWall,
+  draft,
+  draftOrigin,
+  seamEdit,
+  onInteract,
 }: {
   property: FieldProperty;
   mode: EditorMode;
@@ -77,14 +141,49 @@ export function PlanEditor({
   onOpeningTap?: (roomId: string, openingId: string) => void;
   /** Two calibration points picked (plan units). */
   onCalibrate?: (a: Pt, b: Pt) => void;
+  /** Tap the room interior (not a wall). Null when the press missed every room. */
+  onRoomTap?: (roomId: string | null) => void;
+  /** A tap with no drag — open the room menu. */
+  onOpenMenu?: () => void;
+  /** A drag passed the tap slop — keep the room menu closed. */
+  onSuppressMenu?: () => void;
   fitNonce: number;
+  /** When set, Fit frames this room and its closets instead of the whole plan. */
+  fitRoomId?: string | null;
+  /** Square up is open: keep the selected room above the bottom bar. */
+  liftRoom?: boolean;
   drawName?: string | null;
+  /** Wall the laser will fill. */
+  focusWall?: number | null;
+  /** In-progress arrow drawing, in local coordinates. */
+  draft?: {
+    points: Pt[];
+    closets: Pt[][];
+    openings: { a: Pt; b: Pt }[];
+    openCloset: Pt[] | null;
+    preview: Pt | null;
+  } | null;
+  draftOrigin?: Pt;
+  /** Seam lines can be dragged, and the T-seam diagram is drawn on top. */
+  seamEdit?: boolean;
+  /** Any press on the plan. */
+  onInteract?: () => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 360, h: 480 });
+  const [obstacles, setObstacles] = useState<ScreenBox[]>([]);
   const [view, setView] = useState<View>({ scale: 24, tx: 40, ty: 40 });
   const [drag, setDrag] = useState<Drag | null>(null);
   const pointers = useRef(new Map<number, Pt>());
+  const press = useRef({ x: 0, y: 0, menu: false });
+  const labelWait = useRef<number | null>(null);
+  const labelPending = useRef<{ roomId: string; index: number; points: Pt[] } | null>(null);
+  const measured = useRef(false);
+  const fitKey = useRef("");
+  const roomsRef = useRef(property.rooms);
+  const stairsRef = useRef(property.stairs);
+  roomsRef.current = property.rooms;
+  stairsRef.current = property.stairs;
   const selectedRoomId = useField((s) => s.selectedRoomId);
   const select = useField((s) => s.select);
   const selectedOpeningId = useField((s) => s.selectedOpeningId);
@@ -121,16 +220,86 @@ export function PlanEditor({
   useLayoutEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
+    const apply = () => {
+      measured.current = true;
+      setSize({ w: el.clientWidth, h: el.clientHeight });
+    };
+    const ro = new ResizeObserver(apply);
     ro.observe(el);
-    setSize({ w: el.clientWidth, h: el.clientHeight });
+    apply();
     return () => ro.disconnect();
   }, []);
 
-  const fit = useCallback(() => {
-    const pts = [
-      ...property.rooms.flatMap((r) => r.points),
-      ...property.stairs.flatMap((st) => {
+  useLayoutEffect(() => {
+    const canvas = wrap.current;
+    if (!canvas) return;
+    let frame = 0;
+    const measure = () => {
+      const host = canvas.getBoundingClientRect();
+      if (host.width < 8) return;
+      const scope = canvas.parentElement ?? canvas;
+      const boxes: ScreenBox[] = [];
+      scope.querySelectorAll("[data-plan-obstacle]").forEach((node) => {
+        const r = node.getBoundingClientRect();
+        const box = {
+          l: r.left - host.left,
+          t: r.top - host.top,
+          r: r.right - host.left,
+          b: r.bottom - host.top,
+          kind: (node as HTMLElement).dataset.planObstacle,
+        };
+        if (box.r > 4 && box.b > 4 && box.l < host.width - 4 && box.t < host.height - 4) boxes.push(box);
+      });
+      setObstacles((prev) => {
+        if (
+          prev.length === boxes.length &&
+          prev.every(
+            (p, i) =>
+              Math.abs(p.l - boxes[i].l) < 2 &&
+              Math.abs(p.t - boxes[i].t) < 2 &&
+              Math.abs(p.r - boxes[i].r) < 2 &&
+              Math.abs(p.b - boxes[i].b) < 2,
+          )
+        )
+          return prev;
+        return boxes;
+      });
+    };
+    const kick = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const ro = new ResizeObserver(kick);
+    ro.observe(canvas);
+    const parent = canvas.parentElement;
+    if (parent) ro.observe(parent);
+    const mo = new MutationObserver(() => {
+      kick();
+      scopeObserve();
+    });
+    const scopeObserve = () => {
+      (canvas.parentElement ?? canvas).querySelectorAll("[data-plan-obstacle]").forEach((el) => ro.observe(el));
+    };
+    if (parent) mo.observe(parent, { childList: true, subtree: true });
+    kick();
+    scopeObserve();
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, []);
+
+  const fit = useCallback((roomId?: string | null) => {
+    const focus = roomId ? roomsRef.current.find((r) => r.id === roomId) : null;
+    const pts = focus
+      ? [
+          ...focus.points,
+          ...roomsRef.current.filter((r) => r.closet?.parentId === focus.id).flatMap((r) => r.points),
+        ]
+      : [
+      ...roomsRef.current.flatMap((r) => r.points),
+      ...stairsRef.current.flatMap((st) => {
         const r = stairsRect(st);
         return [
           { x: r.x, y: r.y },
@@ -139,25 +308,72 @@ export function PlanEditor({
       }),
     ];
     const b = pts.length ? bbox(pts) : { minX: 0, minY: 0, w: 20 / unitPx, h: 16 / unitPx };
-    const pad = 56;
-    const scale = Math.max(
-      4,
-      Math.min(
-        120,
-        Math.min((size.w - pad * 2) / Math.max(b.w, 1), (size.h - pad * 2) / Math.max(b.h, 1)),
-      ),
-    );
+    const insets = chromeInsets(obstacles, size.w, size.h);
+    const availW = Math.max(80, size.w - insets.left - insets.right);
+    const availH = Math.max(80, size.h - insets.top - insets.bottom);
+    const scale = Math.max(4, Math.min(120, Math.min(availW / Math.max(b.w, 1), availH / Math.max(b.h, 1))));
     setView({
       scale,
-      tx: (size.w - b.w * scale) / 2 - b.minX * scale,
-      ty: (size.h - b.h * scale) / 2 - b.minY * scale,
+      tx: insets.left + (availW - b.w * scale) / 2 - b.minX * scale,
+      ty: insets.top + (availH - b.h * scale) / 2 - b.minY * scale,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx]);
+  }, [size.w, size.h, property.id, property.rooms.length === 0, unitPx, obstacles]);
+
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  // Selecting a room must not throw away a zoom the user already set. Pan only
+  // when that room is mostly off the screen. This runs before Fit so a new
+  // room's fit still wins on the same tick.
+  useEffect(() => {
+    const room = roomsRef.current.find((r) => r.id === selectedRoomId);
+    if (!room || size.w < 40 || size.h < 40) return;
+    const v = viewRef.current;
+    const b = bbox(room.points);
+    const x0 = v.tx + b.minX * v.scale;
+    const y0 = v.ty + b.minY * v.scale;
+    const x1 = v.tx + b.maxX * v.scale;
+    const y1 = v.ty + b.maxY * v.scale;
+    const visW = Math.max(0, Math.min(x1, size.w) - Math.max(x0, 0));
+    const visH = Math.max(0, Math.min(y1, size.h) - Math.max(y0, 0));
+    const frac = (visW * visH) / Math.max(1, (x1 - x0) * (y1 - y0));
+    if (frac >= 0.4) return;
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    setView({ scale: v.scale, tx: size.w / 2 - cx * v.scale, ty: size.h / 2 - cy * v.scale });
+    // size is read when the selection changes; a keyboard resize must not pan.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRoomId]);
+
+  // Fit when the job changes or the user asks. A keyboard, the room bar, or a menu must not
+  // zoom the plan just because the canvas element changed size.
+  useEffect(() => {
+    if (!measured.current || size.w < 40 || size.h < 40) return;
+    const key = `${property.id}|${fitNonce}|${fitRoomId ?? ""}|${property.rooms.length === 0}|${unitPx}`;
+    if (fitKey.current === key) return;
+    fitKey.current = key;
+    fit(fitRoomId);
+  }, [size.w, size.h, fit, fitNonce, fitRoomId, property.id, property.rooms.length, unitPx]);
 
   useEffect(() => {
-    fit();
-  }, [fit, fitNonce]);
+    if (!liftRoom) return;
+    const bar = obstacles.find((o) => o.kind === "room-bar");
+    const room = selectedRoomId ? roomsRef.current.find((r) => r.id === selectedRoomId) : null;
+    if (!bar || !room || size.w < 40 || size.h < 40) return;
+    const b = bbox(room.points);
+    let top = 8;
+    for (const o of obstacles) {
+      if (o.kind === "zoom" || (o.t < 72 && o.b < size.h * 0.45)) top = Math.max(top, o.b + 8);
+    }
+    const labelPad = 32;
+    setView(
+      frameInFreeArea(
+        { minX: b.minX, minY: b.minY, w: b.w, h: b.h },
+        { w: size.w, h: size.h },
+        { top: top + labelPad, right: labelPad, bottom: size.h - bar.t + labelPad, left: labelPad },
+      ),
+    );
+  }, [liftRoom, obstacles, selectedRoomId, size.w, size.h]);
 
   const toPlan = useCallback(
     (e: { clientX: number; clientY: number }): Pt => {
@@ -170,11 +386,22 @@ export function PlanEditor({
     [view],
   );
 
-  const roomAt = (p: Pt) => [...property.rooms].reverse().find((r) => pointInPolygon(p, r.points));
+  const roomAt = (p: Pt) => roomAtPoint(property.rooms, p);
+
+  const noteSlop = (e: { clientX: number; clientY: number }) => {
+    const d = Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y);
+    if (d > TAP_SLOP_PX && !press.current.menu) {
+      press.current.menu = true;
+      onSuppressMenu?.();
+    }
+    return d > TAP_SLOP_PX;
+  };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    onInteract?.();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    press.current = { x: e.clientX, y: e.clientY, menu: false };
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       if (drag && drag.kind !== "pan" && drag.kind !== "pinch") commitDrag();
@@ -188,10 +415,12 @@ export function PlanEditor({
     }
     const p = toPlan(e);
     const target = (e.target as Element).closest("[data-h]") as HTMLElement | null;
-    const h = target?.dataset.h;
+    let h = target?.dataset.h;
     const room = target?.dataset.room
       ? property.rooms.find((r) => r.id === target.dataset.room)
       : undefined;
+    const inside = roomAt(p);
+    if (inside && room && room.id !== inside.id && h && h !== "seam") h = undefined;
 
     if (mode === "calibrate") {
       const next = [...calPts, p];
@@ -244,7 +473,11 @@ export function PlanEditor({
           width: defaultOpeningWidth(mode, property.units),
         });
         select(best.roomId, oid);
+        const placed = mode === "door" ? "Door" : mode === "window" ? "Window" : "Opening";
+        toast.success(`${placed} placed on wall ${best.wall + 1}`);
         onModeDone();
+      } else {
+        toast.error("Tap closer to a wall to place it.");
       }
       return;
     }
@@ -269,8 +502,30 @@ export function PlanEditor({
       });
       return;
     }
-    if (h === "label" && room) {
-      onWallTap(room.id, Number(target!.dataset.i));
+    if (h === "label" && room && mode === "select") {
+      const index = Number(target!.dataset.i);
+      labelPending.current = { roomId: room.id, index, points: room.points };
+      if (labelWait.current) window.clearTimeout(labelWait.current);
+      labelWait.current = window.setTimeout(() => {
+        const pending = labelPending.current;
+        labelWait.current = null;
+        if (!pending) return;
+        const src = pending.points;
+        const a = src[pending.index];
+        const b = src[(pending.index + 1) % src.length];
+        beginDrag();
+        setDrag({
+          kind: "label",
+          roomId: pending.roomId,
+          index: pending.index,
+          points: src,
+          moved: false,
+          base: Math.hypot(b.x - a.x, b.y - a.y),
+          ax: press.current.x,
+          ay: press.current.y,
+        });
+        labelPending.current = null;
+      }, 350);
       return;
     }
     if (h === "opening" && room) {
@@ -282,26 +537,35 @@ export function PlanEditor({
       onPhotoTap(room.id, target!.dataset.photo!);
       return;
     }
+    if (h === "seam" && seamEdit) {
+      const ids = (target!.dataset.rooms ?? "").split(",").filter(Boolean);
+      const lead = property.rooms.find((r) => r.id === ids[0]);
+      beginDrag();
+      setDrag({
+        kind: "seam",
+        roomIds: ids,
+        start: p,
+        offsetFt: lead ? roomFlooring(lead, property.job).seamOffsetFt : 0,
+        pile: target!.dataset.pile === "90" ? 90 : 0,
+      });
+      return;
+    }
     const st = [...property.stairs].reverse().find((x) => {
       const r = stairsRect(x);
       return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
     });
     if (st) {
-      selectStairs(st.id);
       beginDrag();
       setDrag({ kind: "stairs", id: st.id, start: p, x: st.x, y: st.y });
       return;
     }
     const hit = roomAt(p);
     if (hit) {
-      select(hit.id);
       beginDrag();
       setDrag({ kind: "room", roomId: hit.id, start: p, points: hit.points, moved: false });
       return;
     }
-    select(null);
-    selectStairs(null);
-    setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view });
+    setDrag({ kind: "pan", start: { x: e.clientX, y: e.clientY }, view, empty: true });
   };
 
   const setRoomPoints = (roomId: string, points: Pt[]) =>
@@ -313,6 +577,16 @@ export function PlanEditor({
   const onPointerMove = (e: React.PointerEvent) => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!drag && labelPending.current) {
+      const d = Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y);
+      if (d > TAP_SLOP_PX) {
+        if (labelWait.current) window.clearTimeout(labelWait.current);
+        labelWait.current = null;
+        labelPending.current = null;
+        setDrag({ kind: "pan", start: { x: press.current.x, y: press.current.y }, view, empty: false });
+      }
+      return;
+    }
     if (!drag) return;
     if (drag.kind === "pinch") {
       const pts = [...pointers.current.values()];
@@ -350,6 +624,7 @@ export function PlanEditor({
       return;
     }
     if (drag.kind === "room") {
+      if (!noteSlop(e)) return;
       const dx = snap(p.x - drag.start.x, step);
       const dy = snap(p.y - drag.start.y, step);
       if (!dx && !dy && !drag.moved) return;
@@ -357,11 +632,32 @@ export function PlanEditor({
       const others = property.rooms.filter((r) => r.id !== drag.roomId).map((r) => r.points);
       const m = magnetOffset(next, others, 14 / view.scale);
       next = translate(next, m.dx, m.dy);
-      if (!drag.moved && (dx || dy)) setDrag({ ...drag, moved: true });
+      if (!drag.moved) setDrag({ ...drag, moved: true });
       setRoomPoints(drag.roomId, next);
       return;
     }
+    if (drag.kind === "label") {
+      noteSlop(e);
+      const src = drag.points;
+      const a = src[drag.index];
+      const b = src[(drag.index + 1) % src.length];
+      const span = Math.hypot(b.x - a.x, b.y - a.y);
+      if (span < 1e-6) return;
+      const ux = (b.x - a.x) / span;
+      const uy = (b.y - a.y) / span;
+      const along =
+        ((e.clientX - drag.ax) / view.scale) * ux + ((e.clientY - drag.ay) / view.scale) * uy;
+      const min = property.units === "ft" ? 0.5 : 0.15;
+      const length = Math.max(min, snapWallLength(drag.base + along, property.units, wallSnapInches()));
+      const next = setWallLength(src, drag.index, length);
+      if (!next) return;
+      if (!drag.moved) setDrag({ ...drag, moved: true });
+      setRoomPoints(drag.roomId, next);
+      return;
+    }
+    if (drag.kind === "corner" || drag.kind === "wall" || drag.kind === "seam") noteSlop(e);
     if (drag.kind === "stairs") {
+      if (!noteSlop(e)) return;
       const x = drag.x + snap(p.x - drag.start.x, step);
       const y = drag.y + snap(p.y - drag.start.y, step);
       preview((prop) => ({
@@ -384,14 +680,51 @@ export function PlanEditor({
       const d = snap(horizontal ? p.y - drag.start.y : p.x - drag.start.x, step);
       const next = moveWall(drag.points, drag.index, d);
       if (edges(next).every((ed) => ed.length >= step)) setRoomPoints(drag.roomId, next);
+      return;
+    }
+    if (drag.kind === "seam") {
+      const dPlan = drag.pile === 90 ? drag.start.x - p.x : p.y - drag.start.y;
+      const dFt = property.units === "ft" ? dPlan : dPlan / 0.3048;
+      const lead = property.rooms.find((r) => r.id === drag.roomIds[0]);
+      const width = lead ? roomFlooring(lead, property.job).rollWidthFt : 12;
+      let next = drag.offsetFt + dFt;
+      next = ((next % width) + width) % width;
+      const offsetFt = Math.round(next * 100) / 100;
+      preview((prop) => ({
+        ...prop,
+        rooms: prop.rooms.map((r) =>
+          drag.roomIds.includes(r.id)
+            ? { ...r, flooring: { ...r.flooring, seamOffsetFt: offsetFt } }
+            : r,
+        ),
+      }));
     }
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
     pointers.current.delete(e.pointerId);
+    if (labelPending.current) {
+      const pending = labelPending.current;
+      labelPending.current = null;
+      if (labelWait.current) window.clearTimeout(labelWait.current);
+      labelWait.current = null;
+      select(pending.roomId);
+      onWallTap(pending.roomId, pending.index);
+      return;
+    }
     if (!drag) return;
     if (drag.kind === "pinch") {
       if (pointers.current.size === 0) setDrag(null);
+      return;
+    }
+    if (drag.kind === "pan") {
+      const moved = Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) > TAP_SLOP_PX;
+      if (drag.empty && !moved) {
+        select(null);
+        onRoomTap?.(null);
+        selectStairs(null);
+      }
+      setDrag(null);
       return;
     }
     if (drag.kind === "draw") {
@@ -401,20 +734,42 @@ export function PlanEditor({
       const h = Math.abs(drag.end.y - drag.start.y);
       if (w >= step * 2 && h >= step * 2) {
         addRoom(
-          newRoom(drawName || `Room ${property.rooms.length + 1}`, rectPoints(x, y, w, h), "draw"),
+          newRoom(drawName || nextRoomName(property.rooms), rectPoints(x, y, w, h), "draw"),
         );
         onModeDone();
       }
       setDrag(null);
       return;
     }
-    if (
-      drag.kind === "room" ||
-      drag.kind === "corner" ||
-      drag.kind === "wall" ||
-      drag.kind === "stairs" ||
-      drag.kind === "trace"
-    )
+    if (drag.kind === "label") {
+      commitDrag();
+      if (!drag.moved && !press.current.menu) {
+        select(drag.roomId);
+        onWallTap(drag.roomId, drag.index);
+      }
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "room") {
+      commitDrag();
+      if (!drag.moved && !press.current.menu) {
+        select(drag.roomId);
+        onRoomTap?.(drag.roomId);
+        onOpenMenu?.();
+      }
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "stairs") {
+      commitDrag();
+      if (!press.current.menu) {
+        selectStairs(drag.id);
+        onOpenMenu?.();
+      }
+      setDrag(null);
+      return;
+    }
+    if (drag.kind === "corner" || drag.kind === "wall" || drag.kind === "trace" || drag.kind === "seam")
       commitDrag();
     setDrag(null);
   };
@@ -461,6 +816,8 @@ export function PlanEditor({
 
   const px = (n: number) => n / view.scale;
   const selected = property.rooms.find((r) => r.id === selectedRoomId);
+  const laser = obstacles.find((o) => o.kind === "laser");
+  const zoomTop = laser && laser.r > size.w - 176 ? Math.min(size.h * 0.35, laser.b + 8) : 8;
 
   return (
     <div
@@ -470,6 +827,7 @@ export function PlanEditor({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onContextMenu={(e) => e.preventDefault()}
       onWheel={(e) => {
         const r = wrap.current!.getBoundingClientRect();
         const k = Math.exp(-e.deltaY * 0.0015);
@@ -525,23 +883,70 @@ export function PlanEditor({
               />
             );
           })}
-          {property.showSeams !== false &&
-            property.rooms.map((room) =>
-              roomFlooring(room, property.job).material === "carpet"
-                ? carpetLayout(room, property.units, roomFlooring(room, property.job)).seams.map((sm, i) => (
+          {(seamEdit || property.showSeams !== false) &&
+            carpetPlans(property).flatMap((plan) =>
+              plan.layout.marks.map((sm, i) => (
+                <g key={`seam${plan.roomIds.join("-")}${i}`}>
+                  {seamEdit && sm.kind === "seam" && (
                     <line
-                      key={`seam${room.id}${i}`}
                       x1={sm.a.x}
                       y1={sm.a.y}
                       x2={sm.b.x}
                       y2={sm.b.y}
-                      stroke="#d0342c"
-                      strokeWidth={px(2)}
-                      strokeDasharray={`${px(8)} ${px(5)}`}
-                      pointerEvents="none"
+                      stroke="transparent"
+                      strokeWidth={px(22)}
+                      data-h="seam"
+                      data-rooms={sm.roomIds.join(",")}
+                      data-pile={String(plan.layout.pileDeg)}
                     />
-                  ))
-                : null,
+                  )}
+                  <line
+                    x1={sm.a.x}
+                    y1={sm.a.y}
+                    x2={sm.b.x}
+                    y2={sm.b.y}
+                    stroke={sm.kind === "t" ? "#9a3412" : "#d0342c"}
+                    strokeWidth={px(sm.kind === "t" ? 3 : 2)}
+                    strokeDasharray={sm.kind === "t" ? undefined : `${px(8)} ${px(5)}`}
+                    pointerEvents="none"
+                  />
+                </g>
+              )),
+            )}
+          {(seamEdit || property.showSeams !== false) &&
+            carpetPlans(property).flatMap((plan) =>
+              plan.layout.pieces
+                .filter((piece) => piece.corners.length >= 3)
+                .map((piece) => {
+                  const c = {
+                    x: piece.corners.reduce((s, q) => s + q.x, 0) / piece.corners.length,
+                    y: piece.corners.reduce((s, q) => s + q.y, 0) / piece.corners.length,
+                  };
+                  const mark = pieceMark(piece.corners, view.scale);
+                  const len = px(18);
+                  return (
+                    <g key={`pc${piece.n}`} pointerEvents="none">
+                      <line
+                        x1={c.x}
+                        y1={c.y}
+                        x2={c.x + piece.pile.x * len}
+                        y2={c.y + piece.pile.y * len}
+                        stroke="#1d4e89"
+                        strokeWidth={px(1.5)}
+                      />
+                      <text
+                        x={mark.x}
+                        y={mark.y}
+                        fontSize={px(12)}
+                        fontWeight={700}
+                        textAnchor="start"
+                        fill="#9a3412"
+                      >
+                        {piece.n}
+                      </text>
+                    </g>
+                  );
+                }),
             )}
           {property.openings.map((o) => {
             const room = property.rooms.find((r) => r.id === o.roomId);
@@ -663,34 +1068,106 @@ export function PlanEditor({
               </g>
             );
           })}
-          {property.rooms.map((room) => {
-            const c = centroid(room.points);
-            const fs = Math.max(px(13), Math.min(1.1 / unitPx, px(22)));
+          {(() => {
+            const placedLabels: ScreenBox[] = [];
+            let bandTop = 4;
+            let bandBottom = size.h - 4;
+            for (const o of obstacles) {
+              if (o.t < size.h * 0.45 && o.b > 0) bandTop = Math.max(bandTop, o.b + 4);
+              if (o.b > size.h * 0.5) bandBottom = Math.min(bandBottom, o.t - 4);
+            }
+            if (bandBottom < bandTop + 36) bandBottom = Math.min(size.h - 4, bandTop + 36);
+            const labelLimit: LabelLimits = {
+              top: bandTop,
+              bottom: bandBottom,
+              left: 4,
+              right: Math.max(48, size.w - 4),
+            };
+            const captions = layoutCaptions(
+              property.rooms.map((room) => ({
+                id: room.id,
+                points: room.points,
+                name: room.closet ? "Closet" : room.name,
+                area: formatArea(listedArea(property, room), property.units),
+                closet: Boolean(room.closet),
+                holes: property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points),
+              })),
+              view,
+            );
+            for (const room of property.rooms) {
+              const cap = captions.get(room.id);
+              if (cap) placedLabels.push(cap.box);
+              if (view.scale >= 16 && closureGap(room.points) > 0.08 && cap) {
+                placedLabels.push({
+                  l: cap.box.l,
+                  t: cap.box.b + 2,
+                  r: cap.box.r,
+                  b: cap.box.b + 16,
+                });
+              }
+              if (seamEdit || property.showSeams !== false) {
+                const mx = view.tx + (Math.min(...room.points.map((q) => q.x)) + 14 / Math.max(view.scale, 1)) * view.scale;
+                const my = view.ty + (Math.min(...room.points.map((q) => q.y)) + 16 / Math.max(view.scale, 1)) * view.scale;
+                placedLabels.push({ l: mx - 2, t: my - 16, r: mx + 18, b: my + 4 });
+              }
+            }
+            const wallSpots = new Map<string, ReturnType<typeof layoutWallLabels>>();
+            const claimed: { x: number; y: number; length: number; horizontal: boolean }[] = [];
+            const ordered = [
+              ...property.rooms.filter((r) => r.id !== selectedRoomId),
+              ...property.rooms.filter((r) => r.id === selectedRoomId),
+            ];
+            for (const room of ordered) {
+              wallSpots.set(
+                room.id,
+                layoutWallLabels(
+                  edges(room.points),
+                  view,
+                  placedLabels,
+                  labelLimit,
+                  property.rooms.filter((r) => r.id !== room.id).map((r) => r.points),
+                  obstacles,
+                  claimed,
+                  (edge) => formatLength(edge.length, property.units),
+                ),
+              );
+            }
+            return property.rooms.map((room) => {
+            const cap = captions.get(room.id) ?? null;
+            const holes = property.rooms.filter((r) => r.closet?.parentId === room.id).map((r) => r.points);
+            const c = cap ? { x: cap.x, y: cap.y } : roomLabelPoint(room.points, room.closet ? [] : holes);
+            const fs = cap ? cap.fontPx / view.scale : px(12);
             const thumbW = px(64);
             return (
               <g key={`l${room.id}`}>
-                <text
-                  x={c.x}
-                  y={c.y}
-                  fontSize={fs}
-                  fontWeight={700}
-                  textAnchor="middle"
-                  fill="#1c1b18"
-                  pointerEvents="none"
-                >
-                  {room.name}
-                </text>
-                <text
-                  x={c.x}
-                  y={c.y + fs * 1.15}
-                  fontSize={fs * 0.75}
-                  textAnchor="middle"
-                  fill="#5c574d"
-                  pointerEvents="none"
-                >
-                  {formatArea(area(room.points), property.units)}
-                </text>
-                {room.photos.slice(0, 3).map((ph, i, shown) => (
+                {cap?.lines.map((line, i) => (
+                  <text
+                    key={`${i}-${line}`}
+                    x={c.x}
+                    y={c.y + i * fs * 1.2}
+                    fontSize={fs}
+                    fontWeight={i === 0 ? 700 : 500}
+                    textAnchor="middle"
+                    fill={i === 0 ? "#1c1b18" : "#5c574d"}
+                    pointerEvents="none"
+                  >
+                    {line}
+                  </text>
+                ))}
+                {view.scale >= 16 && closureGap(room.points) > 0.08 && cap && (
+                  <text
+                    x={c.x}
+                    y={(cap.box.b + 12 - view.ty) / view.scale}
+                    fontSize={fs * 0.65}
+                    fontWeight={700}
+                    textAnchor="middle"
+                    fill="#8a3b12"
+                    pointerEvents="none"
+                  >
+                    Gap {formatLength(closureGap(room.points), property.units)}
+                  </text>
+                )}
+                {view.scale >= 18 && room.photos.slice(0, 3).map((ph, i, shown) => (
                   <image
                     key={ph.id}
                     data-h="photo"
@@ -705,24 +1182,26 @@ export function PlanEditor({
                     style={{ cursor: "pointer" }}
                   />
                 ))}
-                {edges(room.points).map((e) => {
-                  const L = e.length || 1;
-                  const nx = -(e.b.y - e.a.y) / L;
-                  const ny = (e.b.x - e.a.x) / L;
-                  const tx = (e.a.x + e.b.x) / 2 + nx * px(30);
-                  const ty = (e.a.y + e.b.y) / 2 + ny * px(30);
+                {(room.id === selectedRoomId || view.scale >= 14) && (wallSpots.get(room.id) ?? []).map(({ e, x: tx, y: ty, scale: chip, leader }) => {
                   const label = formatLength(e.length, property.units);
-                  const bw = px(label.length * 7.5 + 14);
-                  const bh = px(22);
+                  const bw = px((label.length * 7.5 + 14) * chip);
+                  const bh = px(22 * chip);
+                  const hit = px(44 * chip);
+                  const midX = (e.a.x + e.b.x) / 2;
+                  const midY = (e.a.y + e.b.y) / 2;
                   return (
+                    <g key={e.index}>
+                      {leader && (
+                        <line x1={midX} y1={midY} x2={tx} y2={ty} stroke="#c9b9a0" strokeWidth={px(1)} pointerEvents="none" />
+                      )}
                     <g
-                      key={e.index}
                       data-h="label"
                       data-room={room.id}
                       data-i={e.index}
-                      transform={`translate(${tx} ${ty}) rotate(${e.horizontal ? 0 : -90})`}
+                      transform={`translate(${tx} ${ty}) rotate(${labelRotation(e)})`}
                       style={{ cursor: "pointer" }}
                     >
+                      <rect x={-Math.max(bw, hit) / 2} y={-hit / 2} width={Math.max(bw, hit)} height={hit} fill="transparent" />
                       <rect
                         x={-bw / 2}
                         y={-bh / 2}
@@ -734,8 +1213,8 @@ export function PlanEditor({
                         strokeWidth={px(1)}
                       />
                       <text
-                        y={px(4.5)}
-                        fontSize={px(13)}
+                        y={px(4.5 * chip)}
+                        fontSize={px(13 * chip)}
                         textAnchor="middle"
                         fill="#8a3b12"
                         fontWeight={600}
@@ -743,12 +1222,76 @@ export function PlanEditor({
                         {label}
                       </text>
                     </g>
+                    </g>
                   );
                 })}
               </g>
             );
-          })}
-          {selected && mode === "select" && (
+          });
+          })()}
+          {selected && focusWall != null && edges(selected.points)[focusWall] && (
+            <line
+              x1={edges(selected.points)[focusWall].a.x}
+              y1={edges(selected.points)[focusWall].a.y}
+              x2={edges(selected.points)[focusWall].b.x}
+              y2={edges(selected.points)[focusWall].b.y}
+              stroke="#b4561d"
+              strokeWidth={px(8)}
+              strokeLinecap="round"
+              pointerEvents="none"
+            />
+          )}
+          {draft && draftOrigin && (
+            <g transform={`translate(${draftOrigin.x} ${draftOrigin.y})`} pointerEvents="none">
+              {draft.points.length > 1 && (
+                <polyline
+                  points={draft.points.map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="none"
+                  stroke="#b4561d"
+                  strokeWidth={px(3)}
+                  strokeDasharray={`${px(7)} ${px(4)}`}
+                />
+              )}
+              {(draft.openCloset ?? draft.points).length > 0 && draft.preview && (
+                <line
+                  x1={(draft.openCloset ?? draft.points).at(-1)!.x}
+                  y1={(draft.openCloset ?? draft.points).at(-1)!.y}
+                  x2={draft.preview.x}
+                  y2={draft.preview.y}
+                  stroke="#b4561d"
+                  strokeWidth={px(2)}
+                  markerEnd="url(#fl-arrow)"
+                />
+              )}
+              {draft.points.map((p, i) => (
+                <circle key={`d${i}`} cx={p.x} cy={p.y} r={px(4.5)} fill="#b4561d" />
+              ))}
+              {draft.closets.map((pts, i) => (
+                <polygon
+                  key={`c${i}`}
+                  points={pts.map((p) => `${p.x},${p.y}`).join(" ")}
+                  fill="#efe2c6"
+                  stroke="#8a3b12"
+                  strokeWidth={px(2)}
+                />
+              ))}
+              {draft.openings.map((seg, i) => (
+                <line
+                  key={`o${i}`}
+                  x1={seg.a.x}
+                  y1={seg.a.y}
+                  x2={seg.b.x}
+                  y2={seg.b.y}
+                  stroke="#f6f2e8"
+                  strokeWidth={px(7)}
+                />
+              ))}
+            </g>
+          )}
+          {selected && mode === "select" && isRectilinear(selected.points) && (() => {
+            const b = bbox(selected.points);
+            return (b.maxX - b.minX) * view.scale >= 120 && (b.maxY - b.minY) * view.scale >= 120;
+          })() && (
             <g>
               {edges(selected.points).map((e) => (
                 <rect
@@ -831,29 +1374,32 @@ export function PlanEditor({
           {formatLength(Math.abs(drag.end.y - drag.start.y), property.units)}
         </div>
       )}
-      {mode !== "select" && !drag && (
-        <div className="pointer-events-none absolute left-1/2 top-3 w-[90%] max-w-md -translate-x-1/2 rounded-xl bg-[#b4561d] px-4 py-3 text-center text-base font-semibold text-white shadow-lg">
-          {mode === "draw"
-            ? "Drag on the grid to draw a room"
-            : mode === "stairs"
-              ? "Tap where the stairs go"
-              : `Tap a wall to place the ${mode === "opening" ? "doorway" : mode}`}
-        </div>
-      )}
-      <div className="absolute bottom-3 right-3 flex flex-col gap-2">
+      <div
+        data-plan-obstacle="zoom"
+        className="absolute right-2 z-20 flex flex-row gap-2"
+        style={{ top: zoomTop }}
+      >
         <ZoomBtn label="+" onClick={() => zoomBy(1.4)} />
         <ZoomBtn label="−" onClick={() => zoomBy(1 / 1.4)} />
-        <ZoomBtn label="Fit" onClick={fit} />
+        <ZoomBtn label="Fit" onClick={() => fit(null)} />
       </div>
     </div>
   );
 
   function zoomBy(k: number) {
-    const scale = Math.max(4, Math.min(160, view.scale * k));
-    const ratio = scale / view.scale;
-    const mx = size.w / 2;
-    const my = size.h / 2;
-    setView({ scale, tx: mx - (mx - view.tx) * ratio, ty: my - (my - view.ty) * ratio });
+    const el = wrap.current;
+    const w = el?.clientWidth || size.w;
+    const h = el?.clientHeight || size.h;
+    const room = selectedRoomId ? property.rooms.find((r) => r.id === selectedRoomId) : null;
+    let anchor = { x: w / 2, y: h / 2 };
+    if (room) {
+      const b = bbox(room.points);
+      anchor = {
+        x: view.tx + ((b.minX + b.maxX) / 2) * view.scale,
+        y: view.ty + ((b.minY + b.maxY) / 2) * view.scale,
+      };
+    }
+    setView(zoomAbout(view, anchor, k));
   }
 }
 
