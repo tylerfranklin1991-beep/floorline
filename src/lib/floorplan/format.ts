@@ -64,26 +64,54 @@ export function planBounds(plan: FloorPlan) {
     maxX = Math.max(maxX, item.x + item.w);
     maxY = Math.max(maxY, item.y + item.h);
   }
-  if (!Number.isFinite(minX) || maxX - minX < 4) {
-    return { minX: 0, minY: 0, maxX: 20, maxY: 16, w: 20, h: 16 };
+  const w = maxX - minX;
+  const h = maxY - minY;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    // Degenerate/empty plan only: fall back to the stated overall size, or a
+    // unit-aware minimal sheet (6 m ≈ 20 ft × 5 m ≈ 16 ft). A small but valid
+    // plan keeps its real bounds — a hardcoded 20×16 sheet used to mask it.
+    const fallbackW =
+      Number.isFinite(plan.overallWidth) && plan.overallWidth > 0
+        ? plan.overallWidth
+        : plan.units === "m"
+          ? 6
+          : 20;
+    const fallbackH =
+      Number.isFinite(plan.overallDepth) && plan.overallDepth > 0
+        ? plan.overallDepth
+        : plan.units === "m"
+          ? 5
+          : 16;
+    return { minX: 0, minY: 0, maxX: fallbackW, maxY: fallbackH, w: fallbackW, h: fallbackH };
   }
-  return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+  return { minX, minY, maxX, maxY, w, h };
 }
 
-export function measureFootprint(rooms: Room[], furniture: Furniture[]) {
-  let maxX = 0;
-  let maxY = 0;
+export function measureFootprint(rooms: Room[], furniture: Furniture[], units: Units = "ft") {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const room of rooms) {
+    minX = Math.min(minX, room.x);
+    minY = Math.min(minY, room.y);
     maxX = Math.max(maxX, room.x + room.w);
     maxY = Math.max(maxY, room.y + room.h);
   }
   for (const item of furniture) {
+    minX = Math.min(minX, item.x);
+    minY = Math.min(minY, item.y);
     maxX = Math.max(maxX, item.x + item.w);
     maxY = Math.max(maxY, item.y + item.h);
   }
+  // Minimum footprint is 4 ft ≈ 1.2 m, in the plan's own units.
+  const minDimension = units === "m" ? 1.2 : 4;
+  if (!Number.isFinite(minX)) {
+    return { overallWidth: minDimension, overallDepth: minDimension };
+  }
   return {
-    overallWidth: Math.max(4, Math.round(maxX * 100) / 100),
-    overallDepth: Math.max(4, Math.round(maxY * 100) / 100),
+    overallWidth: Math.max(minDimension, Math.round((maxX - minX) * 100) / 100),
+    overallDepth: Math.max(minDimension, Math.round((maxY - minY) * 100) / 100),
   };
 }
 
@@ -118,6 +146,8 @@ export function convertPlan(plan: FloorPlan, units: Units): FloorPlan {
     openings,
     overallWidth: scale(plan.overallWidth),
     overallDepth: scale(plan.overallDepth),
+    // scaleReference and measuredDimensions stay in metres (base unit) —
+    // only plan-unit lengths above are converted.
   };
 }
 
@@ -134,16 +164,37 @@ export function scaleMajor(units: Units, width: number): number {
 
 export function sheetLayout(plan: FloorPlan) {
   const bounds = planBounds(plan);
-  const margin = 2.4;
-  const title = 2.85;
+  // Margins are in plan units: 2.4 ft ≈ 0.75 m, 2.85 ft ≈ 0.9 m.
+  // (Previously the raw foot values were used in metric mode too, giving a
+  // 2.4 m margin and a 2.85 m title gap.)
+  const margin = plan.units === "m" ? 0.75 : 2.4;
+  const title = plan.units === "m" ? 0.9 : 2.85;
   return {
     x: bounds.minX - margin,
     y: bounds.minY - margin,
     w: bounds.w + margin * 2,
     h: bounds.h + margin * 2 + title,
     bounds,
-    titleY: bounds.maxY + 0.55,
+    titleY: bounds.maxY + (plan.units === "m" ? 0.17 : 0.55),
   };
+}
+
+/** Short honest label for the sheet caption and inspector. */
+export function accuracyLabel(plan: FloorPlan): string {
+  if (plan.measurementBasis === "measured") return "Measured plan";
+  const shots = plan.measuredDimensions?.length ?? 0;
+  if (shots > 0) {
+    const rooms = new Set(plan.measuredDimensions?.map((d) => d.roomId)).size;
+    return `Partly measured · ${rooms} of ${plan.rooms.length} room${plan.rooms.length === 1 ? "" : "s"} laser-measured`;
+  }
+  return "Estimated plan";
+}
+
+export function accuracyNote(plan: FloorPlan): string {
+  if (plan.measurementBasis === "measured") return "Dimensions were anchored by laser measurements.";
+  if ((plan.measuredDimensions?.length ?? 0) > 0)
+    return "Some dimensions are laser-measured; the rest are estimated from photos.";
+  return "Dimensions are estimated from photos — verify with a tape before building.";
 }
 
 export function sourceCaption(plan: FloorPlan): string {

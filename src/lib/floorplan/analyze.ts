@@ -13,6 +13,21 @@ const InputSchema = z.object({
   hint: z.string().max(600).optional(),
   units: z.enum(["ft", "m"]).default("ft"),
   sourceKind: z.enum(["photos", "video", "mixed"]).optional(),
+  /** Laser scale anchor (metres). When present, dimensions are measured, not estimated. */
+  scaleReference: z
+    .object({
+      kind: z.literal("disto"),
+      meters: z.number().positive().max(500),
+      label: z.string().max(120),
+    })
+    .optional(),
+  /** Rough GPS walk span (metres) — a footprint sanity check only. */
+  gpsSpan: z
+    .object({
+      widthM: z.number().positive().max(10_000),
+      depthM: z.number().positive().max(10_000),
+    })
+    .optional(),
 });
 
 export type AnalyzeResult =
@@ -125,18 +140,25 @@ Coordinate system:
 - Units are ${units === "m" ? "metres" : "feet"}
 - Rooms are axis-aligned rectangles. Represent L-shapes as two named rectangles that share a wall
 - Rooms must share walls and fill the overall footprint without large unexplained gaps or overlaps
-- Infer dimensions from typical architectural sizes when no tape is visible (doors 2.5–3 ft / 0.8–0.95 m, halls 3–4 ft, bedrooms 10–14 ft, baths 5–8 ft). Stay internally consistent
+- Dimensions are ESTIMATES unless a laser scale reference is supplied: use it as the anchor for scale. When no tape or scale reference is visible, estimate from typical architectural sizes (doors 2.5–3 ft / 0.8–0.95 m, halls 3–4 ft, bedrooms 10–14 ft, baths 5–8 ft). Stay internally consistent
 - Openings sit on a room wall. offset is measured from the west end of n/s walls, or the north end of e/w walls
 - Door swing: in-left / in-right / out-left / out-right relative to the room that owns the opening. Windows and cased openings use swing "none"
 - Include visible furniture as simplified blocks with kind in: sofa, bed, table, island, fridge, stove, sink, toilet, shower, bathtub, desk, chair, tv, wardrobe, nightstand, plant
-- If frames show a single room, still produce a complete plan of that room plus any adjacent spaces you can reasonably infer, and lower confidence
+- Only include rooms and spaces actually visible in the frames. If frames show a single room, return just that room; do not invent adjacent spaces. Lower confidence when coverage is partial
 - If the images already show a floor plan, trace it
 - Never invent a second storey unless clearly shown
-- confidence is 0–1 reflecting how complete the reconstruction is
+- confidence is 0–1 reflecting how complete the reconstruction is; it is your own estimate of completeness, not a measurement
 - title should be a short project name, not a sentence`;
 }
 
-function userPrompt(input: { hint?: string; units: Units; count: number; sourceKind?: "photos" | "video" | "mixed" }): string {
+function userPrompt(input: {
+  hint?: string;
+  units: Units;
+  count: number;
+  sourceKind?: "photos" | "video" | "mixed";
+  scaleReference?: { kind: "disto"; meters: number; label: string };
+  gpsSpan?: { widthM: number; depthM: number };
+}): string {
   const hint = input.hint?.trim();
   const source =
     input.sourceKind === "video"
@@ -145,9 +167,15 @@ function userPrompt(input: { hint?: string; units: Units; count: number; sourceK
         ? "These stills mix photographs and frames sampled from video."
         : "These stills are photographs of the space.";
   return [
-    `Reconstruct a measured floor plan from these ${input.count} frames.`,
+    `Reconstruct an estimated floor plan from these ${input.count} frames.`,
     source,
     `Use ${input.units === "m" ? "metres" : "feet"} for every length.`,
+    input.scaleReference
+      ? `Laser scale reference: ${input.scaleReference.label} measured ${input.scaleReference.meters} m — use it to anchor the scale of the plan.`
+      : "",
+    input.gpsSpan
+      ? `GPS walk span about ${Math.round(input.gpsSpan.widthM)}×${Math.round(input.gpsSpan.depthM)} m — use it only as a rough check on the overall footprint, not as room dimensions.`
+      : "",
     hint ? `Surveyor notes from the occupant: ${hint}` : "",
     "Return only the floor plan object.",
   ]
@@ -193,6 +221,7 @@ async function callXai(args: {
       Authorization: `Bearer ${args.apiKey}`,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!res.ok) {
@@ -233,6 +262,8 @@ export const analyzeFloorPlan = createServerFn({ method: "POST" })
         units: data.units,
         count: data.images.length,
         sourceKind: data.sourceKind,
+        scaleReference: data.scaleReference,
+        gpsSpan: data.gpsSpan,
       }),
     });
 
@@ -242,7 +273,10 @@ export const analyzeFloorPlan = createServerFn({ method: "POST" })
         text = await callXai({ apiKey, parts, units: data.units, useSchema: true });
       } catch (first) {
         const message = first instanceof Error ? first.message : "";
-        if (!message.includes("xAI API error")) throw first;
+        // Retry once, and only for rate limits / server errors: retrying a
+        // 401 (bad key) or 400 (bad request) just burns a second call.
+        const status = Number(message.match(/xAI API error (\d+)/)?.[1]);
+        if (!message.includes("xAI API error") || !(status === 429 || status >= 500)) throw first;
         text = await callXai({ apiKey, parts, units: data.units, useSchema: false });
       }
       const parsed = extractJsonObject(text);
@@ -250,6 +284,8 @@ export const analyzeFloorPlan = createServerFn({ method: "POST" })
         sourceKind: data.sourceKind ?? "photos",
         sourceCount: data.images.length,
         units: data.units,
+        scaleReference: data.scaleReference ?? null,
+        gpsSpan: data.gpsSpan ?? null,
       });
       return { ok: true, plan };
     } catch (error) {

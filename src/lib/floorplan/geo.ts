@@ -207,8 +207,17 @@ export function buildSiteHint(site: SurveySite): string {
 const OUTWARD: Record<WallSide, number> = { n: 0, e: 90, s: 180, w: 270 };
 
 function entryOpening(plan: FloorPlan): Opening | undefined {
+  // Match against the room's NAME/TYPE, not the opaque room id (e.g.
+  // "room-abc123") — the old regex tested `item.roomId`, so it almost never
+  // matched and the north arrow fell back to the first door of any kind.
+  const roomById = new Map(plan.rooms.map((room) => [room.id, room]));
+  const isEntryRoom = (item: Opening): boolean => {
+    const room = roomById.get(item.roomId);
+    if (!room) return false;
+    return /liv|hall|entry|foyer/i.test(room.name) || room.type === "living" || room.type === "hallway";
+  };
   return (
-    plan.openings.find((item) => item.kind === "door" && /liv|hall|entry|foyer/i.test(item.roomId)) ??
+    plan.openings.find((item) => item.kind === "door" && isEntryRoom(item)) ??
     plan.openings.find((item) => item.kind === "door")
   );
 }

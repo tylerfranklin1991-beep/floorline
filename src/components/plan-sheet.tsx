@@ -1,4 +1,4 @@
-import { formatArea, formatLength, scaleMajor, sheetLayout, siteCaption, sourceCaption } from "@/lib/floorplan/format";
+import { accuracyLabel, formatArea, formatLength, scaleMajor, sheetLayout, siteCaption, sourceCaption } from "@/lib/floorplan/format";
 import type { FloorPlan, Furniture, Opening, PlanLayers, PlanStyle, Room, WallSide } from "@/lib/floorplan/types";
 
 type Props = {
@@ -623,7 +623,7 @@ export function PlanSheet({
             className="plan-muted-fill"
             style={{ fontFamily: font }}
           >
-            {sourceCaption(plan)} · {formatLength(layout.bounds.w, plan.units)} × {formatLength(layout.bounds.h, plan.units)} ·{" "}
+            {accuracyLabel(plan)} · {sourceCaption(plan)} · {formatLength(layout.bounds.w, plan.units)} × {formatLength(layout.bounds.h, plan.units)} ·{" "}
             {formatArea(layout.bounds.w, layout.bounds.h, plan.units)}
           </text>
           {siteCaption(plan) && (

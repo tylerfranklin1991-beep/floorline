@@ -50,7 +50,7 @@ function toMeters(raw: number, unit: DistoUnit): number {
 function decodeDistance(view: DataView | null): number | null {
   if (!view || view.byteLength < 4) return null;
   const value = view.getFloat32(0, true);
-  if (!Number.isFinite(value) || value <= 0 || value > 500) return null;
+  if (!Number.isFinite(value) || value <= 0) return null;
   return value;
 }
 
@@ -102,10 +102,15 @@ export async function connectDisto(handlers: {
     const unit = parseUnit(unitChar?.value ?? (unitChar ? await unitChar.readValue() : null));
     const raw = decodeDistance(distance.value);
     if (raw == null) return;
+    // Validate AFTER converting to metres: the old check rejected raw values
+    // over 500 before conversion, so a 500 ft shot (~152 m) was dropped while
+    // a 500 m shot was kept.
+    const meters = toMeters(raw, unit);
+    if (!Number.isFinite(meters) || meters <= 0 || meters > 500) return;
     handlers.onReading({
       raw,
       unit,
-      meters: toMeters(raw, unit),
+      meters,
       name: device.name || "DISTO D2",
     });
   };

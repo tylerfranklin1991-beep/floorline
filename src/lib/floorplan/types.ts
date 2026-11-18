@@ -24,6 +24,24 @@ export type PlanStyle = "sheet" | "blueprint" | "ink" | "sketch";
 
 export type SourceKind = "photos" | "video" | "mixed" | "sample";
 
+/** Whether a plan's dimensions were measured or estimated. */
+export type MeasurementBasis = "estimated" | "measured";
+
+/** A scale anchor supplied at trace time (always in metres). */
+export interface ScaleReference {
+  kind: "disto" | "gps-span";
+  meters: number;
+  label: string;
+}
+
+/** One laser-measured room dimension (value always in metres). */
+export interface MeasuredDimension {
+  roomId: string;
+  axis: "w" | "h";
+  meters: number;
+  at: number;
+}
+
 export interface Room {
   id: string;
   name: string;
@@ -93,6 +111,21 @@ export interface FloorPlan {
   sourceKind: SourceKind;
   sourceCount: number;
   confidence: number;
+  /** "model" when the model reported its confidence, "default" when we filled in 0.55. */
+  confidenceSource?: "model" | "default";
+  /**
+   * "estimated" unless a laser scale reference anchored the trace or every
+   * room has a laser-measured dimension. Plans traced from photos alone are
+   * estimates — never present them as measured. Optional so plans saved
+   * before this field existed still load; treat a missing value as "estimated".
+   */
+  measurementBasis?: MeasurementBasis;
+  /** Geometry problems found while normalizing (overlaps, off-wall openings, …). */
+  validationWarnings?: string[];
+  /** Scale anchor used at trace time, if any (metres). */
+  scaleReference?: ScaleReference | null;
+  /** Laser-measured room dimensions applied after tracing (metres). */
+  measuredDimensions?: MeasuredDimension[];
   site?: SiteFix | null;
   headings?: HeadingSample[];
   track?: { lat: number; lng: number }[];

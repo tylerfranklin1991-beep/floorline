@@ -29,7 +29,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#f3efe4" },
       {
         name: "description",
-        content: "Turn photos and video of a space into a measured floor plan.",
+        content: "Turn photos and video of a space into an estimated floor plan.",
       },
     ],
     links: [

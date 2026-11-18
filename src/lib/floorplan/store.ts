@@ -35,6 +35,9 @@ function normalizePlan(value: unknown): FloorPlan | null {
     overallWidth: typeof value.overallWidth === "number" ? value.overallWidth : 20,
     overallDepth: typeof value.overallDepth === "number" ? value.overallDepth : 16,
     northAngle: typeof value.northAngle === "number" ? value.northAngle : 0,
+    // Plans saved before these fields existed are estimates, not measured.
+    measurementBasis: value.measurementBasis ?? "estimated",
+    validationWarnings: Array.isArray(value.validationWarnings) ? value.validationWarnings : [],
   };
 }
 
@@ -195,15 +198,17 @@ export const usePlanStore = create<PlanState>()(
         const rooms = plan.rooms.map((room) => {
           if (room.id !== id) return room;
           const next = { ...room, ...patch };
-          if (typeof patch.w === "number") next.w = Math.max(2.5, patch.w);
-          if (typeof patch.h === "number") next.h = Math.max(2.5, patch.h);
+          // Minimum room dimension is 2.5 ft ≈ 0.76 m, in the plan's units.
+          const minDimension = plan.units === "m" ? 0.76 : 2.5;
+          if (typeof patch.w === "number") next.w = Math.max(minDimension, patch.w);
+          if (typeof patch.h === "number") next.h = Math.max(minDimension, patch.h);
           return next;
         });
         set({
           plan: {
             ...plan,
             rooms,
-            ...measureFootprint(rooms, plan.furniture),
+            ...measureFootprint(rooms, plan.furniture, plan.units),
           },
         });
       },
@@ -220,7 +225,7 @@ export const usePlanStore = create<PlanState>()(
           plan: {
             ...plan,
             furniture,
-            ...measureFootprint(plan.rooms, furniture),
+            ...measureFootprint(plan.rooms, furniture, plan.units),
           },
         });
       },
@@ -243,7 +248,7 @@ export const usePlanStore = create<PlanState>()(
           plan: {
             ...plan,
             furniture: items,
-            ...measureFootprint(plan.rooms, items),
+            ...measureFootprint(plan.rooms, items, plan.units),
           },
         });
       },
@@ -284,8 +289,38 @@ export const usePlanStore = create<PlanState>()(
       applyDisto: (axis) => {
         const { plan, selectedRoomId, distoMeters } = get();
         if (!plan || !selectedRoomId || distoMeters == null) return;
-        const value = Math.max(1, fromMeters(distoMeters, plan.units));
-        get().updateRoom(selectedRoomId, { [axis]: value });
+        // Minimum is 1 ft ≈ 0.3 m, in the plan's units (was 1 in both).
+        const value = Math.max(plan.units === "m" ? 0.3 : 1, fromMeters(distoMeters, plan.units));
+        // Set the dimension directly: updateRoom's 2.5 ft / 0.76 m manual-edit
+        // minimum must not round a real laser measurement up.
+        const rooms = plan.rooms.map((room) =>
+          room.id === selectedRoomId ? { ...room, [axis]: value } : room,
+        );
+        set({
+          plan: { ...plan, rooms, ...measureFootprint(rooms, plan.furniture, plan.units) },
+        });
+        // Record the laser shot on the plan. One measured dimension does not
+        // make the whole plan measured — the plan becomes "measured" only
+        // once every room has at least one laser-measured dimension.
+        const current = get().plan;
+        if (!current) return;
+        const shot = { roomId: selectedRoomId, axis, meters: distoMeters, at: Date.now() };
+        const measuredDimensions = [
+          ...(current.measuredDimensions ?? []).filter(
+            (d) => !(d.roomId === selectedRoomId && d.axis === axis),
+          ),
+          shot,
+        ];
+        const measuredRoomIds = new Set(measuredDimensions.map((d) => d.roomId));
+        const allMeasured =
+          current.rooms.length > 0 && current.rooms.every((room) => measuredRoomIds.has(room.id));
+        set({
+          plan: {
+            ...current,
+            measuredDimensions,
+            measurementBasis: allMeasured ? "measured" : (current.measurementBasis ?? "estimated"),
+          },
+        });
       },
       reset: () =>
         set({
