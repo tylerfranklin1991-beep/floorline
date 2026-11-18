@@ -11,6 +11,10 @@ export const SAMPLE_PLAN: FloorPlan = {
   sourceKind: "sample",
   sourceCount: 0,
   confidence: 1,
+  // Hand-drawn demo sheet, not a model trace: no confidence source, and
+  // "estimated" — it was never measured on site.
+  measurementBasis: "estimated",
+  validationWarnings: [],
   notes:
     "A compact 30' × 28' loft used as a demonstration sheet. Living and kitchen share the north light; private rooms sit along the south wall.",
   rooms: [

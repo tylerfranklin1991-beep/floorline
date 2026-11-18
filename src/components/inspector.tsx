@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatLength, fromMeters, roomTypeLabel } from "@/lib/floorplan/format";
+import { accuracyLabel, accuracyNote, formatLength, fromMeters, roomTypeLabel } from "@/lib/floorplan/format";
 import { cardinalLabel, formatAccuracy, formatCoords, osmTileUrl, requestGpsFix, siteFromFix } from "@/lib/floorplan/geo";
 import { reverseSite } from "@/lib/floorplan/site";
 import { usePlanStore } from "@/lib/floorplan/store";
@@ -283,10 +283,23 @@ export function Inspector() {
       </div>
 
       {plan.sourceKind !== "sample" && (
-        <p className="text-xs tabular-nums text-muted-foreground">
-          Confidence {Math.round(plan.confidence * 100)}% · {plan.sourceCount} source
-          {plan.sourceCount === 1 ? "" : "s"}
-        </p>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs tabular-nums text-muted-foreground">
+            {accuracyLabel(plan)} · Confidence {Math.round(plan.confidence * 100)}%
+            {plan.confidenceSource === "default" ? " (default estimate)" : " (model estimate)"} · {plan.sourceCount} source
+            {plan.sourceCount === 1 ? "" : "s"}
+          </p>
+          <p className="text-xs leading-relaxed text-muted-foreground">{accuracyNote(plan)}</p>
+          {(plan.validationWarnings?.length ?? 0) > 0 && (
+            <ul className="flex flex-col gap-1">
+              {plan.validationWarnings?.map((warning) => (
+                <li key={warning} className="text-xs leading-relaxed text-muted-foreground">
+                  Check: {warning}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <div>

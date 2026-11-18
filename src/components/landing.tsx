@@ -2,7 +2,7 @@ import { ArrowRight, DraftingCompass } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { analyzeFloorPlan } from "@/lib/floorplan/analyze";
 import { relativeTime } from "@/lib/floorplan/format";
-import { attachSite, buildSiteHint } from "@/lib/floorplan/geo";
+import { attachSite, buildSiteHint, trackSpan } from "@/lib/floorplan/geo";
 import { prepareForAnalysis, filesToMedia, type MediaItem } from "@/lib/floorplan/media";
 import { SAMPLE_PLAN } from "@/lib/floorplan/sample";
 import { loadSampleSurvey, SAMPLE_SURVEY_FILES, SAMPLE_SURVEY_HINT } from "@/lib/floorplan/sample-survey";
@@ -43,6 +43,12 @@ export function Landing() {
     if (media.length === 0) return;
     const usedSite = site ?? siteRef.current;
     const siteHint = usedSite ? buildSiteHint(usedSite) : "";
+    // GPS walk span is a rough footprint check for the trace — not a
+    // measurement of any room. See normalizePlan.
+    const span = usedSite ? trackSpan(usedSite.track) : null;
+    const gpsSpan = span
+      ? { widthM: Math.round(span.widthM * 10) / 10, depthM: Math.round(span.depthM * 10) / 10 }
+      : undefined;
     const workId = existingWorkId ?? beginWork("preparing", "Reading frames");
     setSurveyFrames([]);
     try {
@@ -57,6 +63,7 @@ export function Landing() {
             hint: extraHint?.trim() || siteHint || hint.trim() || undefined,
             units: unitsPref,
             sourceKind: prepared.sourceKind,
+            gpsSpan,
           },
         }),
         new Promise<never>((_, reject) => {
@@ -192,7 +199,7 @@ export function Landing() {
         <section className="stagger-enter">
           <p className="text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase">Survey from frames</p>
           <h1 className="landing-title font-display text-foreground">
-            Turn a walkthrough into a measured plan.
+            Turn a walkthrough into an estimated plan.
           </h1>
           <p className="landing-copy max-w-md text-base leading-relaxed text-pretty text-muted-foreground">
             Follow live prompts as you film each room, photograph a space, or drop a clip. Floorline traces walls, doors,
@@ -336,8 +343,8 @@ export function Landing() {
           </div>
 
           <p className="px-1 pb-2 text-xs leading-relaxed text-muted-foreground">
-            Photograph corners and doorways, or film a slow walkthrough. Floorline infers scale from typical door and
-            room sizes when a tape is not in frame.
+            Photograph corners and doorways, or film a slow walkthrough. Floorline estimates scale from typical door and
+            room sizes when a tape is not in frame — verify dimensions with a tape before building.
           </p>
         </section>
       </main>

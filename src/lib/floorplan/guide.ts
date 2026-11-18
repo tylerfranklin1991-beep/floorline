@@ -274,7 +274,7 @@ export function buildGuideHint(
     keys ? `Locked shots: ${keys}.` : "",
     evidence ? `Evidence in frames: ${evidence}.` : "",
     "Reconstruct rooms in that sequence from the entry, sharing walls, with doors at the filmed connections.",
-    "Infer scale from door widths and typical room sizes. Include visible furniture.",
+    "Estimate scale from door widths and typical room sizes; dimensions are estimates unless a laser measurement is supplied. Include visible furniture.",
   ]
     .filter(Boolean)
     .join(" ");
